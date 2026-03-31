@@ -43,7 +43,7 @@ jobs:
           
 
       - name: Install dependencies
-        working-directory: ./samples/adk-stale-agent
+        working-directory: ./samples/adk-stale-agent/package.json
         run: |
           npm install
           npm install axios axios-retry luxon date-fns
