@@ -40,10 +40,11 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+          cache-dependency-path: './samples/adk-stale-agent/package-lock.json'
           
 
       - name: Install dependencies
-        working-directory: ./samples/adk-stale-agent/package.json
+        working-directory: ./samples/adk-stale-agent
         run: |
           npm install
           npm install axios axios-retry luxon date-fns
