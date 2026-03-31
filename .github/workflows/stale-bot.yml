@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Stale Issue Auditor (JS)
+name:  Stale Issue Auditor (JS)
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ on:
 jobs:
   audit-stale-issues:
     if: github.repository == 'Varun-S10/A2UI'
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-latest
     timeout-minutes: 60
 
     permissions:
@@ -31,14 +31,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          clean: true
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -47,18 +45,12 @@ jobs:
           npm install axios axios-retry luxon date-fns
           npm install --save-dev ts-node typescript @types/node @types/luxon
           npm install @google/adk @google/adk-devtools
-
-      - name: Build @google/adk (required)
-        run: |
-          if [ -d "node_modules/@google/adk" ]; then
-            cd node_modules/@google/adk
-            npm install && npm run build
-            cd ../../../
-          fi
+          
 
       - name: Run Auditor Agent Script
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CONCURRENCY_LIMIT: ${{ secrets.CONCURRENCY_LIMIT }}
           LLM_MODEL_NAME: ${{ secrets.LLM_MODEL_NAME }}
           NODE_PATH: samples/adk-stale-agent
@@ -72,4 +64,5 @@ jobs:
           GRAPHQL_EDIT_LIMIT: ${{ secrets.GRAPHQL_EDIT_LIMIT }}
           GRAPHQL_TIMELINE_LIMIT: ${{ secrets.GRAPHQL_TIMELINE_LIMIT }}
           SLEEP_BETWEEN_CHUNKS: ${{ secrets.SLEEP_BETWEEN_CHUNKS }}
-        run: gtech-run npx tsx samples/adk-stale-agent/main.ts
+
+        run: npx tsx dev/samples/adk-stale-agent/main.ts
