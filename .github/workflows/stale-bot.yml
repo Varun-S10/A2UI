@@ -44,6 +44,7 @@ jobs:
       - name: Install dependencies
         working-directory: ./samples/adk-stale-agent
         run: |
+          touch ~/.npmrc
           npx google-artifactregistry-auth
           npm ci
           npm install axios axios-retry luxon date-fns
