@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
 name: Stale Issue Auditor (JS)
 
 on:
@@ -38,18 +37,25 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: './samples/adk-stale-agent/package-lock.json'
 
       - name: Install dependencies
         working-directory: ./samples/adk-stale-agent
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "@google:registry=https://npm.pkg.github.com" > .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
-          npm install
+          npm ci
+          npm install axios axios-retry luxon date-fns
+          npm install --save-dev ts-node typescript @types/node @types/luxon
+          npm install @google/adk @google/adk-devtools
+
+      - name: Build @google/adk (required)
+        working-directory: ./samples/adk-stale-agent
+        run: |
+          if [ -d "node_modules/@google/adk" ]; then
+            cd node_modules/@google/adk
+            npm install && npm run build
+          fi
 
       - name: Run Auditor Agent Script
         working-directory: ./samples/adk-stale-agent
@@ -68,4 +74,5 @@ jobs:
           GRAPHQL_EDIT_LIMIT: ${{ secrets.GRAPHQL_EDIT_LIMIT }}
           GRAPHQL_TIMELINE_LIMIT: ${{ secrets.GRAPHQL_TIMELINE_LIMIT }}
           SLEEP_BETWEEN_CHUNKS: ${{ secrets.SLEEP_BETWEEN_CHUNKS }}
+        # FIXED: Added the execution command
         run: gtech-run npx tsx samples/adk-stale-agent/main.ts
