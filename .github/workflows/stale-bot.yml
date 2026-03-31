@@ -41,30 +41,31 @@ jobs:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: './samples/adk-stale-agent/package-lock.json'
-          
 
       - name: Install dependencies
         working-directory: ./samples/adk-stale-agent
         run: |
-          npm install
+          npm ci
+          # Re-installing specific tools if they aren't in the lockfile
           npm install axios axios-retry luxon date-fns
           npm install --save-dev ts-node typescript @types/node @types/luxon
           npm install @google/adk @google/adk-devtools
 
       - name: Build @google/adk (required)
+        working-directory: ./samples/adk-stale-agent
         run: |
           if [ -d "node_modules/@google/adk" ]; then
             cd node_modules/@google/adk
             npm install && npm run build
-            cd ../../../
           fi
 
       - name: Run Auditor Agent Script
+        working-directory: ./samples/adk-stale-agent
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CONCURRENCY_LIMIT: ${{ secrets.CONCURRENCY_LIMIT }}
           LLM_MODEL_NAME: ${{ secrets.LLM_MODEL_NAME }}
-          NODE_PATH: samples/adk-stale-agent
+          NODE_PATH: .
           OWNER: ${{ secrets.OWNER }}
           REPO: ${{ secrets.REPO }}
           STALE_LABEL_NAME: ${{ secrets.STALE_LABEL_NAME }}
