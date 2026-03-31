@@ -45,19 +45,7 @@ jobs:
       - name: Install dependencies
         working-directory: ./samples/adk-stale-agent
         run: |
-          npm ci
-          # Re-installing specific tools if they aren't in the lockfile
-          npm install axios axios-retry luxon date-fns
-          npm install --save-dev ts-node typescript @types/node @types/luxon
-          npm install @google/adk @google/adk-devtools
-
-      - name: Build @google/adk (required)
-        working-directory: ./samples/adk-stale-agent
-        run: |
-          if [ -d "node_modules/@google/adk" ]; then
-            cd node_modules/@google/adk
-            npm install && npm run build
-          fi
+          npm install
 
       - name: Run Auditor Agent Script
         working-directory: ./samples/adk-stale-agent
