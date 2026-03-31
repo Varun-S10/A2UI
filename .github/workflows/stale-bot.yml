@@ -44,7 +44,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./samples/adk-stale-agent
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "@google:registry=https://npm.pkg.github.com" > .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
           npm install
 
       - name: Run Auditor Agent Script
