@@ -1,9 +1,18 @@
+## Unreleased
+
+## 0.10.0
+
+- **BREAKING CHANGE**: Rename Icon `path` property to `svgPath` to fix type collision with `DataBindingType`.
+- (v0_9) Add `computeColorVariant` helper function for basic catalog components to generate CSS formulas for color variants (light, dark, hover), allowing reuse across renderers.
+
 ## 0.9.1
 
 - Add new `FrameworkSignal` concept, which represents a generic signal from a
   given framework like Preact or Angular.
   - Unused in this version; future versions will introduce this throughout web
     core and will likely be breaking changes.
+- Export `injectDefaultA2uiTheme` with default CSS variable values used
+  by the A2UI basic catalogs.
 
 ## 0.8.8
 

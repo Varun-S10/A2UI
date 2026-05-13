@@ -32,7 +32,7 @@ from google.adk.agents import run_config
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
-from google.adk.models.lite_llm import LiteLlm
+from google.adk.models import Gemini
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -42,16 +42,18 @@ from prompt_builder import (
     UI_DESCRIPTION,
 )
 from tools import get_restaurants
-from a2ui.core.schema.constants import VERSION_0_8, VERSION_0_9, A2UI_OPEN_TAG, A2UI_CLOSE_TAG
-from a2ui.core.schema.manager import A2uiSchemaManager
-from a2ui.core.parser.parser import parse_response, ResponsePart
-from a2ui.basic_catalog.provider import BasicCatalog
-from a2ui.core.schema.common_modifiers import remove_strict_validation
-from a2ui.a2a import (
-    get_a2ui_agent_extension,
-    parse_response_to_parts,
-    stream_response_to_parts,
+from a2ui.schema.constants import (
+    VERSION_0_8,
+    VERSION_0_9,
+    A2UI_OPEN_TAG,
+    A2UI_CLOSE_TAG,
 )
+from a2ui.schema.manager import A2uiSchemaManager
+from a2ui.parser.parser import parse_response, ResponsePart
+from a2ui.basic_catalog.provider import BasicCatalog
+from a2ui.schema.common_modifiers import remove_strict_validation
+from a2ui.a2a.extension import get_a2ui_agent_extension
+from a2ui.a2a.parts import parse_response_to_parts, stream_response_to_parts
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +149,12 @@ class RestaurantAgent:
       self, schema_manager: Optional[A2uiSchemaManager] = None
   ) -> LlmAgent:
     """Builds the LLM agent for the restaurant agent."""
-    LITELLM_MODEL = os.getenv("LITELLM_MODEL", "gemini/gemini-2.5-flash")
+    model_env = (
+        os.getenv("MODEL_NAME")
+        or os.getenv("LITELLM_MODEL")
+        or "gemini-3-flash-preview"
+    )
+    model_name = model_env.split("/")[-1]
 
     instruction = (
         schema_manager.generate_system_prompt(
@@ -162,7 +169,7 @@ class RestaurantAgent:
     )
 
     return LlmAgent(
-        model=LiteLlm(model=LITELLM_MODEL),
+        model=Gemini(model=model_name),
         name="restaurant_agent",
         description="An agent that finds restaurants and helps book tables.",
         instruction=instruction,
@@ -170,9 +177,13 @@ class RestaurantAgent:
     )
 
   async def stream(
-      self, query, session_id, ui_version: Optional[str] = None
+      self,
+      query,
+      session_id,
+      ui_version: Optional[str] = None,
+      use_streaming: bool = True,
   ) -> AsyncIterable[dict[str, Any]]:
-    session_state = {"base_url": self.base_url}
+    session_state = {"base_url": self.base_url, "expression": "{expression}"}
 
     # Determine which runner to use based on whether the a2ui extension is active.
     if ui_version:
@@ -239,13 +250,18 @@ class RestaurantAgent:
       )
 
       full_content_list = []
+      parts_streamed = False
 
       async def token_stream():
         async for event in runner.run_async(
             user_id=self._user_id,
             session_id=session.id,
             run_config=run_config.RunConfig(
-                streaming_mode=run_config.StreamingMode.SSE
+                streaming_mode=(
+                    run_config.StreamingMode.SSE
+                    if use_streaming
+                    else run_config.StreamingMode.NONE
+                )
             ),
             new_message=current_message,
         ):
@@ -256,7 +272,7 @@ class RestaurantAgent:
                 yield p.text
 
       if selected_catalog:
-        from a2ui.core.parser.streaming import A2uiStreamParser
+        from a2ui.parser.streaming import A2uiStreamParser
 
         if session_id in self._parsers:
           self._parsers.move_to_end(session_id)
@@ -269,6 +285,7 @@ class RestaurantAgent:
             self._parsers[session_id],
             token_stream(),
         ):
+          parts_streamed = True
           yield {
               "is_task_complete": False,
               "parts": [part],
@@ -342,7 +359,7 @@ class RestaurantAgent:
 
         yield {
             "is_task_complete": True,
-            "parts": final_parts,
+            "parts": [] if (use_streaming and parts_streamed) else final_parts,
         }
         return  # We're done, exit the generator
 

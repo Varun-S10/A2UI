@@ -8,11 +8,11 @@ message validation for A2A (Agent-to-Agent/Agent-to-Client) communication.
 
 The `agent_sdk` revolves around three main classes:
 
-* **`CatalogConfig`**: Defines the metadata for a component catalog (name,
+- **`CatalogConfig`**: Defines the metadata for a component catalog (name,
   schema path, examples path).
-* **`A2uiCatalog`**: Represents a processed catalog, providing methods for
+- **`A2uiCatalog`**: Represents a processed catalog, providing methods for
   validation and LLM instruction rendering.
-* **`A2uiSchemaManager`**: The central coordinator that loads catalogs, manages
+- **`A2uiSchemaManager`**: The central coordinator that loads catalogs, manages
   versioning, and generates system prompts.
 
 ## Prerequisites
@@ -27,8 +27,8 @@ The first step in any A2UI-enabled agent is initializing the
 `A2uiSchemaManager`.
 
 ```python
-from a2ui.core.schema.constants import VERSION_0_9
-from a2ui.core.schema.manager import A2uiSchemaManager, CatalogConfig
+from a2ui.schema.constants import VERSION_0_9
+from a2ui.schema.manager import A2uiSchemaManager, CatalogConfig
 from a2ui.basic_catalog.provider import BasicCatalog
 
 # Define your catalogs (basic or bring your own) with optional examples
@@ -132,7 +132,7 @@ agent_executor = MyAgentExecutor(
 Before processing a request, negotiate which version of the A2UI extension to activate based on the client request and your agent's advertised capabilities.
 
 ```python
-from a2ui.a2a import try_activate_a2ui_extension
+from a2ui.a2a.extension import try_activate_a2ui_extension
 
 # In your request handler:
 activated_version = try_activate_a2ui_extension(context, agent_card)
@@ -156,7 +156,7 @@ Use this approach if you wait for the LLM to finish its entire response before p
 Validate the LLM's JSON output before returning it. The SDK's `A2uiCatalog` validates the payload and attempts to fix simple errors (e.g., trailing commas).
 
 ```python
-from a2ui.core.parser.parser import parse_response
+from a2ui.parser.parser import parse_response
 
 # Parse the full response into parts
 response_parts = parse_response(full_text)
@@ -178,7 +178,7 @@ Wrap the validated payloads in an A2A `DataPart` with the correct MIME type (`ap
 The `parse_response_to_parts` helper is the most efficient way to split text, extract JSON, validate, and wrap into A2A `Part` objects in one go.
 
 ```python
-from a2ui.a2a import parse_response_to_parts
+from a2ui.a2a.parts import parse_response_to_parts
 
 yield {
     "is_task_complete": True,
@@ -188,10 +188,11 @@ yield {
 
 ##### Option B: Incremental Streaming Parsing (Advanced)
 
-Use this approach for sub-second UI updates. The `A2uiStreamParser` **automatically parses, validates, and fixes (heals)** the JSON payload chunks *incrementally* as they arrive from the LLM stream. It yields valid UI messages *before* the entire JSON block is complete by automatically closing open quotes and braces.
+Use this approach for sub-second UI updates. The `A2uiStreamParser` **automatically parses, validates, and fixes (heals)** the JSON payload chunks _incrementally_ as they arrive from the LLM stream. It yields valid UI messages _before_ the entire JSON block is complete by automatically closing open quotes and braces.
 
 > [!IMPORTANT]
 > **Prerequisite**: To use incremental streaming, your agent executor must support streaming mode. In ADK, enable this using `RunConfig`:
+>
 > ```python
 > run_config=run_config.RunConfig(
 >     streaming_mode=run_config.StreamingMode.SSE
@@ -199,8 +200,8 @@ Use this approach for sub-second UI updates. The `A2uiStreamParser` **automatica
 > ```
 
 ```python
-from a2ui.core.parser.streaming import A2uiStreamParser
-from a2ui.a2a import create_a2ui_part
+from a2ui.parser.streaming import A2uiStreamParser
+from a2ui.a2a.parts import create_a2ui_part
 
 parser = A2uiStreamParser(catalog=selected_catalog)
 
@@ -208,7 +209,7 @@ parser = A2uiStreamParser(catalog=selected_catalog)
 for chunk in llm_response_stream:
     # Process text chunks as they arrive
     response_parts = parser.process_chunk(chunk.text)
-    
+
     for part in response_parts:
         if part.a2ui_json:
             # Yield partial UI updates immediately
@@ -235,7 +236,7 @@ For agents with a fixed set of UI capabilities, simply use the `schema_manager`
 to generate the system instruction.
 
 **Example Samples:**
-[contact_lookup](../../../samples/agent/adk/contact_lookup), [restaurant_finder](../../../samples/agent/adk/restaurant_finder)
+[restaurant_finder](../../../samples/agent/adk/restaurant_finder)
 
 ```python
 # Generate system prompt
@@ -258,7 +259,7 @@ user's request, client capabilities, or conversational context. This is common
 for dashboard-style agents that support multiple distinct visualization types (
 e.g., Charts vs. Maps).
 
-**Example Sample:** [rizzcharts](../../../samples/agent/adk/rizzcharts)
+**Example Sample:** [rizzcharts](../../../samples/agent/adk/rizzcharts/python)
 
 #### 2a. Injecting Catalogs into Session State
 
@@ -330,7 +331,6 @@ When the LLM calls the UI tool, the toolset uses the dynamic catalog to:
 3. **Validate Payloads**: Validate the LLM's generated JSON against the specific
    `A2uiCatalog` object's validator.
 
-
 ### 3. Multiple Version Support
 
 To support multiple protocol versions (e.g., v0.8 and v0.9), pre-configure `A2uiSchemaManager` and `LlmAgent` instances for each version during your agent's initialization. At runtime, use `try_activate_a2ui_extension` to negotiate the version and select the pre-configured schema manager or runner.
@@ -397,6 +397,3 @@ agent_card = AgentCard(
     )
 )
 ```
-
-
-
