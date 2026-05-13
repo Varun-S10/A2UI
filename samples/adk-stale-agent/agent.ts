@@ -108,9 +108,7 @@ export function replayHistoryToFindState(
     // Only store text if it's a comment
     if (etype === 'commented') {
       last_comment_text = event.data ?? null;
-    } else {
-      last_comment_text = null;
-    }
+    } 
   }
 
   return {
@@ -398,11 +396,33 @@ export async function getCachedMaintainers(): Promise<string[]> {
 
   try {
     const url = `${GITHUB_BASE_URL}/repos/${OWNER}/${REPO}/collaborators`;
-    const params = {permission: 'push'};
+    
+    let page = 1;
+    let hasMore = true;
+    let allCollaborators: GitHubUser[] =[];
 
-    const data = await getRequest<GitHubUser[]>(url, params);
+    // Loop to fetch all pages of collaborators
+    while (hasMore) {
+      // Set per_page to maximum (100) and request the current page number
+      const params = { permission: 'push', per_page: 100, page: page };
 
-    maintainersCache = data.map((u) => u.login);
+      // Fetch the data for the current page
+      const data = await getRequest<GitHubUser[]>(url, params);
+
+      // Add the newly fetched users to our complete list
+      allCollaborators = allCollaborators.concat(data);
+
+      // If the API returns exactly 100 items, there is likely another page.
+      // If it returns fewer than 100, we have reached the end of the list.
+      if (data.length === 100) {
+        page++;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    // Map over the completely assembled list
+    maintainersCache = allCollaborators.map((u) => u.login);
 
     console.info(`Cached ${maintainersCache.length} maintainers.`);
     return maintainersCache;

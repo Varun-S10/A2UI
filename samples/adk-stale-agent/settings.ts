@@ -27,12 +27,20 @@ if (!GITHUB_TOKEN) {
   throw new Error('GITHUB_TOKEN environment variable not set');
 }
 
-export const OWNER = process.env.OWNER ?? '';
-export const REPO = process.env.REPO ?? '';
-export const LLM_MODEL_NAME = process.env.LLM_MODEL_NAME ?? '';
-export const STALE_LABEL_NAME = process.env.STALE_LABEL_NAME ?? '';
-export const REQUEST_CLARIFICATION_LABEL =
-  process.env.REQUEST_CLARIFICATION_LABEL ?? '';
+
+function getRequiredEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Startup Error: Missing required environment variable '${name}'`);
+  }
+  return value;
+}
+
+export const OWNER = getRequiredEnv('OWNER');;
+export const REPO = getRequiredEnv('REPO');
+export const LLM_MODEL_NAME = getRequiredEnv('LLM_MODEL_NAME');
+export const STALE_LABEL_NAME = getRequiredEnv('STALE_LABEL_NAME');
+export const REQUEST_CLARIFICATION_LABEL = getRequiredEnv('REQUEST_CLARIFICATION_LABEL');
 
 // # --- THRESHOLDS IN HOURS ---
 // # Default: 168 hours (7 days)

@@ -177,10 +177,10 @@ export async function getOldOpenIssueNumbers(
 
   const cutoffStr = cutoffDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-  const query = `repo:${owner}/${repo} is:issue state:open created:<${cutoffStr}`;
+  const query = `repo:${owner}/${repo} is:issue state:open updated:<${cutoffStr}`;
 
   console.log(
-    `Searching for issues in '${owner}/${repo}' created before ${cutoffStr}...`,
+    `Searching for issues in '${owner}/${repo}' updated before ${cutoffStr}...`,
   );
 
   const issueNumbers: number[] = [];
