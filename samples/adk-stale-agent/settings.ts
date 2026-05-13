@@ -27,7 +27,6 @@ if (!GITHUB_TOKEN) {
   throw new Error('GITHUB_TOKEN environment variable not set');
 }
 
-
 function getRequiredEnv(name) {
   const value = process.env[name];
   if (!value) {
@@ -36,7 +35,7 @@ function getRequiredEnv(name) {
   return value;
 }
 
-export const OWNER = getRequiredEnv('OWNER');;
+export const OWNER = getRequiredEnv('OWNER');
 export const REPO = getRequiredEnv('REPO');
 export const LLM_MODEL_NAME = getRequiredEnv('LLM_MODEL_NAME');
 export const STALE_LABEL_NAME = getRequiredEnv('STALE_LABEL_NAME');
@@ -45,9 +44,7 @@ export const REQUEST_CLARIFICATION_LABEL = getRequiredEnv('REQUEST_CLARIFICATION
 // # --- THRESHOLDS IN HOURS ---
 // # Default: 168 hours (7 days)
 // # The number of hours of inactivity after a maintainer comment before an issue is marked as stale.
-export const STALE_HOURS_THRESHOLD: number = parseFloat(
-  process.env.STALE_HOURS_THRESHOLD ?? '168',
-);
+export const STALE_HOURS_THRESHOLD: number = parseFloat(process.env.STALE_HOURS_THRESHOLD ?? '168');
 
 // # Default: 168 hours (7 days)
 // # The number of hours of inactivity after an issue is marked 'stale' before it is closed.
@@ -58,10 +55,7 @@ export const CLOSE_HOURS_AFTER_STALE_THRESHOLD: number = parseFloat(
 // # --- Performance Configuration ---
 // # The number of issues to process concurrently.
 // # Higher values are faster but increase the immediate rate of API calls
-export const CONCURRENCY_LIMIT: number = parseInt(
-  process.env.CONCURRENCY_LIMIT ?? '3',
-  10,
-);
+export const CONCURRENCY_LIMIT: number = parseInt(process.env.CONCURRENCY_LIMIT ?? '3', 10);
 
 // # --- GraphQL Query Limits ---
 // # The number of most recent comments to fetch for context analysis.
@@ -71,10 +65,7 @@ export const GRAPHQL_COMMENT_LIMIT: number = parseInt(
 );
 
 // # The number of most recent description edits to fetch.
-export const GRAPHQL_EDIT_LIMIT: number = parseInt(
-  process.env.GRAPHQL_EDIT_LIMIT ?? '10',
-  10,
-);
+export const GRAPHQL_EDIT_LIMIT: number = parseInt(process.env.GRAPHQL_EDIT_LIMIT ?? '10', 10);
 
 // # The number of most recent timeline events (labels, renames, reopens) to fetch.
 export const GRAPHQL_TIMELINE_LIMIT: number = parseInt(
@@ -84,6 +75,4 @@ export const GRAPHQL_TIMELINE_LIMIT: number = parseInt(
 
 // # --- Rate Limiting ---
 // # Time in seconds to wait between processing chunks.
-export const SLEEP_BETWEEN_CHUNKS: number = parseFloat(
-  process.env.SLEEP_BETWEEN_CHUNKS ?? '1.5',
-);
+export const SLEEP_BETWEEN_CHUNKS: number = parseFloat(process.env.SLEEP_BETWEEN_CHUNKS ?? '1.5');

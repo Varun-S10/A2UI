@@ -23,18 +23,12 @@ import {
   SLEEP_BETWEEN_CHUNKS,
   STALE_HOURS_THRESHOLD,
 } from './settings.js';
-import {
-  getApiCallCount,
-  getOldOpenIssueNumbers,
-  resetApiCallCount,
-} from './utils.js';
+import {getApiCallCount, getOldOpenIssueNumbers, resetApiCallCount} from './utils.js';
 
 export const APP_NAME = 'stale_bot_app';
 export const USER_ID = 'stale_bot_user';
 
-async function processSingleIssue(
-  issueNumber: number,
-): Promise<[number, number]> {
+async function processSingleIssue(issueNumber: number): Promise<[number, number]> {
   const startTime = performance.now();
   const startApiCalls = getApiCallCount();
 
@@ -76,9 +70,7 @@ async function processSingleIssue(
   const issueApiCalls = endApiCalls - startApiCalls;
 
   console.info(
-    `Issue #${issueNumber} finished in ${duration.toFixed(
-      2,
-    )}s with ~${issueApiCalls} API calls.`,
+    `Issue #${issueNumber} finished in ${duration.toFixed(2)}s with ~${issueApiCalls} API calls.`,
   );
 
   return [duration, issueApiCalls];
@@ -123,13 +115,9 @@ async function main() {
     const chunk = allIssues.slice(i, i + CONCURRENCY_LIMIT);
     const currentChunkNum = Math.floor(i / CONCURRENCY_LIMIT) + 1;
 
-    console.info(
-      `--- Starting chunk ${currentChunkNum}: Processing issues ${chunk} ---`,
-    );
+    console.info(`--- Starting chunk ${currentChunkNum}: Processing issues ${chunk} ---`);
 
-    const results = await Promise.all(
-      chunk.map((issueNum) => processSingleIssue(issueNum)),
-    );
+    const results = await Promise.all(chunk.map(issueNum => processSingleIssue(issueNum)));
 
     for (const [duration, apiCalls] of results) {
       totalProcessingTime += duration;
@@ -139,18 +127,13 @@ async function main() {
     processedCount += chunk.length;
 
     console.info(
-      `--- Finished chunk ${currentChunkNum}. Progress: ` +
-        `${processedCount}/${totalCount} ---`,
+      `--- Finished chunk ${currentChunkNum}. Progress: ` + `${processedCount}/${totalCount} ---`,
     );
 
     if (i + CONCURRENCY_LIMIT < totalCount) {
-      console.debug(
-        `Sleeping for ${SLEEP_BETWEEN_CHUNKS}s to respect rate limits...`,
-      );
+      console.debug(`Sleeping for ${SLEEP_BETWEEN_CHUNKS}s to respect rate limits...`);
 
-      await new Promise((resolve) =>
-        setTimeout(resolve, SLEEP_BETWEEN_CHUNKS * 1000),
-      );
+      await new Promise(resolve => setTimeout(resolve, SLEEP_BETWEEN_CHUNKS * 1000));
     }
   }
 
@@ -161,9 +144,7 @@ async function main() {
   console.info('--- Stale Agent Run Finished ---');
   console.info(`Successfully processed ${processedCount} issues.`);
   console.info(`Total API calls made this run: ${totalApiCallsForRun}`);
-  console.info(
-    `Average processing time per issue: ${avgTimePerIssue.toFixed(2)} seconds.`,
-  );
+  console.info(`Average processing time per issue: ${avgTimePerIssue.toFixed(2)} seconds.`);
 }
 
 async function run() {

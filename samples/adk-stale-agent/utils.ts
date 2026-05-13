@@ -66,10 +66,7 @@ axiosRetry(httpClient, {
   },
 });
 
-export async function getRequest<T>(
-  url: string,
-  params?: Record<string, unknown>,
-): Promise<T> {
+export async function getRequest<T>(url: string, params?: Record<string, unknown>): Promise<T> {
   incrementApiCallCount();
   try {
     const response = await httpClient.get<T>(url, {params});
@@ -179,9 +176,7 @@ export async function getOldOpenIssueNumbers(
 
   const query = `repo:${owner}/${repo} is:issue state:open updated:<${cutoffStr}`;
 
-  console.log(
-    `Searching for issues in '${owner}/${repo}' updated before ${cutoffStr}...`,
-  );
+  console.log(`Searching for issues in '${owner}/${repo}' updated before ${cutoffStr}...`);
 
   const issueNumbers: number[] = [];
   let page = 1;

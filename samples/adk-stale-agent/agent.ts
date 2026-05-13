@@ -42,20 +42,14 @@ import {
   RequestException,
 } from './utils.js';
 
-export const BOT_ALERT_SIGNATURE =
-  '**Notification:** The author has updated the issue description';
+export const BOT_ALERT_SIGNATURE = '**Notification:** The author has updated the issue description';
 export const BOT_NAME = 'adk-bot';
 
 // --- Global Cache ---
 let maintainersCache: string[] | null = null;
 
 export interface HistoryEvent {
-  type:
-    | 'created'
-    | 'commented'
-    | 'edited_description'
-    | 'renamed_title'
-    | 'reopened';
+  type: 'created' | 'commented' | 'edited_description' | 'renamed_title' | 'reopened';
   actor: string | null;
   time: Date;
   data: string | null;
@@ -108,7 +102,7 @@ export function replayHistoryToFindState(
     // Only store text if it's a comment
     if (etype === 'commented') {
       last_comment_text = event.data ?? null;
-    } 
+    }
   }
 
   return {
@@ -238,8 +232,7 @@ export function buildHistoryTimeline(
     }
 
     if (actor && !actor.endsWith('[bot]') && actor !== BOT_NAME) {
-      const prettyType =
-        etype === 'RenamedTitleEvent' ? 'renamed_title' : 'reopened';
+      const prettyType = etype === 'RenamedTitleEvent' ? 'renamed_title' : 'reopened';
 
       history.push({
         type: prettyType,
@@ -396,15 +389,15 @@ export async function getCachedMaintainers(): Promise<string[]> {
 
   try {
     const url = `${GITHUB_BASE_URL}/repos/${OWNER}/${REPO}/collaborators`;
-    
+
     let page = 1;
     let hasMore = true;
-    let allCollaborators: GitHubUser[] =[];
+    let allCollaborators: GitHubUser[] = [];
 
     // Loop to fetch all pages of collaborators
     while (hasMore) {
       // Set per_page to maximum (100) and request the current page number
-      const params = { permission: 'push', per_page: 100, page: page };
+      const params = {permission: 'push', per_page: 100, page: page};
 
       // Fetch the data for the current page
       const data = await getRequest<GitHubUser[]>(url, params);
@@ -422,15 +415,12 @@ export async function getCachedMaintainers(): Promise<string[]> {
     }
 
     // Map over the completely assembled list
-    maintainersCache = allCollaborators.map((u) => u.login);
+    maintainersCache = allCollaborators.map(u => u.login);
 
     console.info(`Cached ${maintainersCache.length} maintainers.`);
     return maintainersCache;
   } catch (error: unknown) {
-    console.error(
-      `FATAL: Failed to verify repository maintainers. Error:`,
-      error,
-    );
+    console.error(`FATAL: Failed to verify repository maintainers. Error:`, error);
     throw new Error('Maintainer verification failed. Processing aborted.');
   }
 }
@@ -447,11 +437,10 @@ async function getIssueState({item_number}: {item_number: number}) {
     const rawData = await fetchGraphqlData(item_number);
 
     const issueAuthor = rawData.author?.login ?? 'unknown';
-    const labelsList: string[] = rawData.labels?.nodes.map((l) => l.name) || [];
+    const labelsList: string[] = rawData.labels?.nodes.map(l => l.name) || [];
 
     //  Parse & sort history
-    const [history, labelEvents, lastBotAlertTime] =
-      buildHistoryTimeline(rawData);
+    const [history, labelEvents, lastBotAlertTime] = buildHistoryTimeline(rawData);
 
     //  Replay history to determine state
     const state = replayHistoryToFindState(history, maintainers, issueAuthor);
@@ -467,13 +456,8 @@ async function getIssueState({item_number}: {item_number: number}) {
     const isStale = labelsList.includes(STALE_LABEL_NAME);
     let daysSinceStaleLabel = 0.0;
     if (isStale && labelEvents.length) {
-      const latestLabelTime = new Date(
-        Math.max(...labelEvents.map((d) => d.getTime())),
-      );
-      daysSinceStaleLabel = currentTime.diff(
-        DateTime.fromJSDate(latestLabelTime),
-        'days',
-      ).days;
+      const latestLabelTime = new Date(Math.max(...labelEvents.map(d => d.getTime())));
+      daysSinceStaleLabel = currentTime.diff(DateTime.fromJSDate(latestLabelTime), 'days').days;
     }
 
     // Silent edit alert logic
@@ -483,9 +467,7 @@ async function getIssueState({item_number}: {item_number: number}) {
       state.last_action_type === 'edited_description'
     ) {
       if (lastBotAlertTime && lastBotAlertTime > state.last_activity_time) {
-        console.info(
-          `#${item_number}: Silent edit detected, but Bot already alerted. No spam.`,
-        );
+        console.info(`#${item_number}: Silent edit detected, but Bot already alerted. No spam.`);
       } else {
         maintainerAlertNeeded = true;
         console.info(`#${item_number}: Silent edit detected. Alert needed.`);
@@ -577,9 +559,7 @@ export const close_as_stale = new FunctionTool({
   name: 'close_as_stale',
   description: 'Closes a GitHub issue that has been marked as stale.',
   parameters: z.object({
-    item_number: z
-      .number()
-      .describe('The GitHub issue number to close as stale.'),
+    item_number: z.number().describe('The GitHub issue number to close as stale.'),
   }),
   execute: closeAsStale,
 });
@@ -605,12 +585,9 @@ async function alertMaintainerOfEdit({item_number}: {item_number: number}) {
 
 export const alert_maintainer_of_edit = new FunctionTool({
   name: 'alert_maintainer_of_edit',
-  description:
-    'Posts a comment alerting maintainers of a silent description update.',
+  description: 'Posts a comment alerting maintainers of a silent description update.',
   parameters: z.object({
-    item_number: z
-      .number()
-      .describe('The GitHub issue number to alert maintainers about.'),
+    item_number: z.number().describe('The GitHub issue number to alert maintainers about.'),
   }),
   execute: alertMaintainerOfEdit,
 });
@@ -658,9 +635,7 @@ const add_stale_label_and_comment = new FunctionTool({
   name: 'add_stale_label_and_comment',
   description: 'Marks a GitHub issue as stale with a comment and label.',
   parameters: z.object({
-    item_number: z
-      .number()
-      .describe('The GitHub issue number to mark as stale.'),
+    item_number: z.number().describe('The GitHub issue number to mark as stale.'),
   }),
   execute: addStaleLabelAndComment,
 });
@@ -689,9 +664,7 @@ const add_label_to_issue = new FunctionTool({
   name: 'add_label_to_issue',
   description: 'Adds a label to a GitHub issue.',
   parameters: z.object({
-    item_number: z
-      .number()
-      .describe('The GitHub issue number to which the label should be added.'),
+    item_number: z.number().describe('The GitHub issue number to which the label should be added.'),
     label_name: z.string().describe('The name of the label to add.'),
   }),
   execute: addLabelToIssue,
@@ -722,9 +695,7 @@ export const remove_label_from_issue = new FunctionTool({
   parameters: z.object({
     item_number: z
       .number()
-      .describe(
-        'The GitHub issue number from which the label should be removed.',
-      ),
+      .describe('The GitHub issue number from which the label should be removed.'),
     label_name: z.string().describe('The name of the label to remove.'),
   }),
   execute: removeLabelFromIssue,
@@ -742,13 +713,8 @@ export function loadPromptTemplate(filename: string): string {
   return readFileSync(fileURLToPath(filePath), 'utf-8');
 }
 
-function formatPrompt(
-  template: string,
-  vars: Record<string, string | number>,
-): string {
-  return template.replace(/\{(\w+)\}/g, (_, key) =>
-    String(vars[key] ?? `{${key}}`),
-  );
+function formatPrompt(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (_, key) => String(vars[key] ?? `{${key}}`));
 }
 
 const PROMPT_TEMPLATE = loadPromptTemplate('PROMPT_INSTRUCTION.txt');

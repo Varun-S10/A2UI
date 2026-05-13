@@ -17,7 +17,7 @@ name: Stale Issue Auditor (JS)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: "0 6 * * *"
 
 jobs:
   audit-stale-issues:
@@ -36,14 +36,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: samples/adk-stale-agent/package-lock.json 
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: samples/adk-stale-agent/package-lock.json
 
       - name: Install dependencies
-        working-directory: samples/adk-stale-agent 
-        run: npm ci 
-          
+        working-directory: samples/adk-stale-agent
+        run: npm ci
+
       - name: Run Auditor Agent Script
         working-directory: samples/adk-stale-agent
         env:
@@ -51,7 +51,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CONCURRENCY_LIMIT: ${{ secrets.CONCURRENCY_LIMIT }}
           LLM_MODEL_NAME: ${{ secrets.LLM_MODEL_NAME }}
-          NODE_PATH: . 
+          NODE_PATH: .
           OWNER: ${{ secrets.OWNER }}
           REPO: ${{ secrets.REPO }}
           STALE_LABEL_NAME: ${{ secrets.STALE_LABEL_NAME }}
