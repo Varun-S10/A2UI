@@ -19,7 +19,7 @@ import {restaurantThemeSheet} from '../theme/restaurant-theme.js';
 
 export const restaurantConfig: AppConfig = {
   key: 'restaurant',
-  title: 'Restaurant Finder',
+  title: 'Restaurant Finders',
   heroImage: '/hero.png',
   heroImageDark: '/hero-dark.png',
   placeholder: 'Top 5 Chinese restaurants in New York.',
