@@ -111,6 +111,7 @@ export type InferredComponentApiSchemaType<Api extends ComponentApi> = z.infer<A
  */
 export declare interface CatalogInterface<T extends ComponentApi> {
   readonly id: string;
+  readonly aliases?: readonly string[];
   readonly components: ReadonlyMap<string, T>;
   readonly functions: ReadonlyMap<string, FunctionImplementation>;
   readonly themeSchema?: z.ZodObject<any>;
@@ -122,6 +123,7 @@ export declare interface CatalogInterface<T extends ComponentApi> {
  */
 export class Catalog<T extends ComponentApi> implements CatalogInterface<T> {
   readonly id: string;
+  readonly aliases?: readonly string[];
 
   /**
    * A map of available components.
@@ -150,8 +152,10 @@ export class Catalog<T extends ComponentApi> implements CatalogInterface<T> {
     components: T[],
     functions: FunctionImplementation[] = [],
     themeSchema?: z.ZodObject<any>,
+    aliases?: readonly string[],
   ) {
     this.id = id;
+    this.aliases = aliases;
 
     const compMap = new Map<string, T>();
     for (const comp of components) {

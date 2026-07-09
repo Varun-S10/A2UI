@@ -38,6 +38,14 @@
       "types": "./dist/src/v0_9/basic_catalog/index.d.ts",
       "default": "./dist/src/v0_9/basic_catalog/index.js"
     },
+    "./v0_9_1": {
+      "types": "./dist/src/v0_9/index.d.ts",
+      "default": "./dist/src/v0_9/index.js"
+    },
+    "./v0_9_1/basic_catalog": {
+      "types": "./dist/src/v0_9/basic_catalog/index.d.ts",
+      "default": "./dist/src/v0_9/basic_catalog/index.js"
+    },
     "./data/*": {
       "types": "./dist/src/v0_8/data/*.d.ts",
       "default": "./dist/src/v0_8/data/*.js"
@@ -80,6 +88,8 @@
         "../../specification/v0_8/json/*.json",
         "../../specification/v0_9/json/*.json",
         "../../specification/v0_9/catalogs/**/*.json",
+        "../../specification/v0_9_1/json/*.json",
+        "../../specification/v0_9_1/catalogs/**/*.json",
         "../../specification/v1_0/json/*.json",
         "../../specification/v1_0/catalogs/**/*.json",
         "scripts/copy-spec.js"

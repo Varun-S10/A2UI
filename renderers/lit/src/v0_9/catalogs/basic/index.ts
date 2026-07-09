@@ -68,4 +68,6 @@ export const basicCatalog = new Catalog<LitComponentApi>(
     A2uiModal,
   ],
   BASIC_FUNCTIONS,
+  undefined,
+  ['https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json'],
 );

@@ -96,6 +96,11 @@ export interface BasicCatalogOptions {
   id?: string;
 
   /**
+   * An optional array of alias URLs for the catalog.
+   */
+  aliases?: readonly string[];
+
+  /**
    * An optional locale to configure catalog-level formatting.
    */
   locale?: string;
@@ -148,7 +153,9 @@ export class BasicCatalogBase extends AngularCatalog {
       ...(options.extraComponents ?? []),
     ];
 
-    super(id, components, functions);
+    const aliases =
+      options.aliases ?? ['https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json'];
+    super(id, components, functions, undefined, aliases);
   }
 }
 

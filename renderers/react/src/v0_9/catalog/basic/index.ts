@@ -64,6 +64,8 @@ export const basicCatalog = new Catalog<ReactComponentImplementation>(
   'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json',
   basicComponents,
   BASIC_FUNCTIONS,
+  undefined,
+  ['https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json'],
 );
 
 export {

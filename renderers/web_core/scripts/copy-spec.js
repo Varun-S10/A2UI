@@ -26,8 +26,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, '..');
 
 function copySchemas(version) {
-  const srcJsonDir = join(rootDir, '..', '..', 'specification', version, 'json');
-  const srcCatalogsDir = join(rootDir, '..', '..', 'specification', version, 'catalogs');
+  const specVersion = version === 'v0_9' ? 'v0_9_1' : version;
+  const srcJsonDir = join(rootDir, '..', '..', 'specification', specVersion, 'json');
+  const srcCatalogsDir = join(rootDir, '..', '..', 'specification', specVersion, 'catalogs');
   const destDir = join(rootDir, 'src', version, 'schemas');
 
   mkdirSync(destDir, {recursive: true});

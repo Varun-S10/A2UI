@@ -1,5 +1,7 @@
 ## Unreleased
 
+- (v0_9) Support v0.9.1 basic catalog alias resolution and add `./v0_9_1` package subpath exports ([#1749](https://github.com/a2ui-project/a2ui/issues/1749)).
+
 ## 0.10.1
 
 - (v0_9) Tighten resolved child list types in the basic catalog layout components.

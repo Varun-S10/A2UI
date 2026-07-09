@@ -1,5 +1,7 @@
 ## Unreleased
 
+- (v0_9) Support v0.9.1 protocol payloads, Zod schema validation, catalog alias resolution, and `./v0_9_1` package subpath exports ([#1749](https://github.com/a2ui-project/a2ui/issues/1749)).
+
 ## 0.10.4
 
 - (v0_9) Support JSON Pointer escaping (RFC 6901) in DataModel ([#1796](https://github.com/a2ui-project/a2ui/pull/1796)).

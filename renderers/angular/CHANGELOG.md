@@ -1,5 +1,7 @@
 ## Unreleased
 
+- (v0_9) Support v0.9.1 basic catalog alias resolution in BasicCatalogBase ([#1749](https://github.com/a2ui-project/a2ui/issues/1749)).
+
 ## 0.10.3
 
 - (v0_9) Export Angular test utilities under `@a2ui/angular/testing` and secondary entry point `@a2ui/angular/v0_9/testing`. [#1737](https://github.com/a2ui-project/a2ui/pull/1737)

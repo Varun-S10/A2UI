@@ -19,7 +19,7 @@ import {AnyComponentSchema} from './common-types.js';
 
 export const CreateSurfaceMessageSchema = z
   .object({
-    version: z.literal('v0.9'),
+    version: z.enum(['v0.9', 'v0.9.1']),
     createSurface: z
       .object({
         surfaceId: z.string().describe('The unique identifier for the UI surface to be rendered.'),
@@ -36,7 +36,7 @@ export const CreateSurfaceMessageSchema = z
 
 export const UpdateComponentsMessageSchema = z
   .object({
-    version: z.literal('v0.9'),
+    version: z.enum(['v0.9', 'v0.9.1']),
     updateComponents: z
       .object({
         surfaceId: z.string().describe('The unique identifier for the UI surface to be updated.'),
@@ -51,7 +51,7 @@ export const UpdateComponentsMessageSchema = z
 
 export const UpdateDataModelMessageSchema = z
   .object({
-    version: z.literal('v0.9'),
+    version: z.enum(['v0.9', 'v0.9.1']),
     updateDataModel: z
       .object({
         surfaceId: z
@@ -69,7 +69,7 @@ export const UpdateDataModelMessageSchema = z
 
 export const DeleteSurfaceMessageSchema = z
   .object({
-    version: z.literal('v0.9'),
+    version: z.enum(['v0.9', 'v0.9.1']),
     deleteSurface: z
       .object({
         surfaceId: z.string().describe('The unique identifier for the UI surface to be deleted.'),
@@ -79,7 +79,7 @@ export const DeleteSurfaceMessageSchema = z
   .strict();
 
 export declare interface CreateSurfaceMessage extends z.infer<typeof CreateSurfaceMessageSchema> {
-  version: 'v0.9';
+  version: 'v0.9' | 'v0.9.1';
   createSurface: {
     surfaceId: string;
     catalogId: string;
@@ -90,7 +90,7 @@ export declare interface CreateSurfaceMessage extends z.infer<typeof CreateSurfa
 export declare interface UpdateComponentsMessage extends z.infer<
   typeof UpdateComponentsMessageSchema
 > {
-  version: 'v0.9';
+  version: 'v0.9' | 'v0.9.1';
   updateComponents: {
     surfaceId: string;
     components: any[];
@@ -99,7 +99,7 @@ export declare interface UpdateComponentsMessage extends z.infer<
 export declare interface UpdateDataModelMessage extends z.infer<
   typeof UpdateDataModelMessageSchema
 > {
-  version: 'v0.9';
+  version: 'v0.9' | 'v0.9.1';
   updateDataModel: {
     surfaceId: string;
     path?: string;
@@ -107,7 +107,7 @@ export declare interface UpdateDataModelMessage extends z.infer<
   };
 }
 export declare interface DeleteSurfaceMessage extends z.infer<typeof DeleteSurfaceMessageSchema> {
-  version: 'v0.9';
+  version: 'v0.9' | 'v0.9.1';
   deleteSurface: {
     surfaceId: string;
   };

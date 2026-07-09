@@ -32,7 +32,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // `__dirname` will be `dist/src/v0_9/schema` when run via `node --test dist/**/*.test.js`
-const SPEC_DIR_V0_9 = resolve(__dirname, '../../../../../../specification/v0_9/json');
+const SPEC_DIR_V0_9 = resolve(__dirname, '../../../../../../specification/v0_9_1/json');
 
 // Parse both so we can do structural comparison rather than formatting
 // Compare definitions specifically, ignoring descriptions

@@ -40,6 +40,10 @@
       "types": "./dist/src/v0_9/index.d.ts",
       "default": "./dist/src/v0_9/index.js"
     },
+    "./v0_9_1": {
+      "types": "./dist/src/v0_9/index.d.ts",
+      "default": "./dist/src/v0_9/index.js"
+    },
     "./ui": {
       "types": "./dist/src/0.8/ui/ui.d.ts",
       "default": "./dist/src/0.8/ui/ui.js"
