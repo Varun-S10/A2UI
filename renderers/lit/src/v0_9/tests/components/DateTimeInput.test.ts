@@ -16,7 +16,7 @@
 
 import {setupTestDom, teardownTestDom, asyncUpdate} from '../dom-setup.js';
 import assert from 'node:assert';
-import {describe, it, beforeEach, after, before} from 'node:test';
+import {describe, it, after, before} from 'node:test';
 import {ComponentContext, MessageProcessor} from '@a2ui/web_core/v0_9';
 
 describe('DateTimeInput Component', () => {
