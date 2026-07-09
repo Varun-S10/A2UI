@@ -153,8 +153,9 @@ export class BasicCatalogBase extends AngularCatalog {
       ...(options.extraComponents ?? []),
     ];
 
-    const aliases =
-      options.aliases ?? ['https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json'];
+    const aliases = options.aliases ?? [
+      'https://a2ui.org/specification/v0_9_1/catalogs/basic/catalog.json',
+    ];
     super(id, components, functions, undefined, aliases);
   }
 }
