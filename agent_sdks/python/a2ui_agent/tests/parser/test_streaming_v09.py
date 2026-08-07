@@ -420,7 +420,8 @@ def test_streaming_msg_type_deduplication(mock_catalog):
     parser = DirectJsonStreamParser(catalog=mock_catalog)
     # 1. Send partial chunk that triggers sniffing
     chunk1 = (
-        A2UI_OPEN_TAG + '[{"version": "v0.9", "updateComponents": {"surfaceId": "s1",'
+        A2UI_OPEN_TAG
+        + '[{"version": "v0.9", "updateComponents": {"surfaceId": "s1",'
         ' "components": [{"id": "root", "component": "Text", "text": "Hello"}'
     )
     parser.process_chunk(chunk1)
@@ -448,7 +449,8 @@ def test_v09_path_heuristic_relative_path(mock_catalog):
     chunk_cs = (
         A2UI_OPEN_TAG
         + '[{"version": "v0.9", "createSurface": {"surfaceId": "s1", "catalogId":'
-        ' "c1"}}]' + A2UI_CLOSE_TAG
+        ' "c1"}}]'
+        + A2UI_CLOSE_TAG
     )
     list(parser.process_chunk(chunk_cs))
 
@@ -457,7 +459,8 @@ def test_v09_path_heuristic_relative_path(mock_catalog):
         A2UI_OPEN_TAG
         + '[{"version": "v0.9", "updateComponents": {"surfaceId": "s1", "components":'
         ' [{"id": "root", "component": "Text", "text": {"path":'
-        ' "some/relative/path"}}]}}]' + A2UI_CLOSE_TAG
+        ' "some/relative/path"}}]}}]'
+        + A2UI_CLOSE_TAG
     )
 
     messages = []
@@ -479,7 +482,8 @@ def test_v09_path_heuristic_absolute_path(mock_catalog):
     chunk_cs = (
         A2UI_OPEN_TAG
         + '[{"version": "v0.9", "createSurface": {"surfaceId": "s1", "catalogId":'
-        ' "c1"}}]' + A2UI_CLOSE_TAG
+        ' "c1"}}]'
+        + A2UI_CLOSE_TAG
     )
     list(parser.process_chunk(chunk_cs))
 
@@ -528,7 +532,8 @@ def test_v09_multiple_top_level_objects(mock_catalog):
         + '{"version": "v0.9", "createSurface": {"surfaceId": "s1", "catalogId":'
         ' "c1"}}\n'
         + '{"version": "v0.9", "updateComponents": {"surfaceId": "s1", "components":'
-        ' [{"id": "root", "component": "Text", "text": "Hello"}]}}' + A2UI_CLOSE_TAG
+        ' [{"id": "root", "component": "Text", "text": "Hello"}]}}'
+        + A2UI_CLOSE_TAG
     )
     messages = []
     for part in parser.process_chunk(chunk):

@@ -93,7 +93,9 @@ those can be added too:
       "oneOf": [
         {"$ref": "#/functions/trim"},
         {"$ref": "#/functions/getScreenResolution"},
-        {"$ref": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json#/$defs/anyFunction"}
+        {
+          "$ref": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json#/$defs/anyFunction"
+        }
       ]
     }
   }

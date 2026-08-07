@@ -22,10 +22,7 @@
               "type": "string"
             },
             "children": {
-              "type": "array",
-              "items": {
-                "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentId"
-              }
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ChildList"
             }
           },
           "required": ["component"]

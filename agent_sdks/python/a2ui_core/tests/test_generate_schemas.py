@@ -31,7 +31,9 @@ def test_map_json_type_to_python():
         generate_schemas.map_json_type_to_python(
             "id",
             {
-                "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentId"
+                "$ref": (
+                    "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentId"
+                )
             },
         )
         == "ComponentId"
@@ -40,7 +42,9 @@ def test_map_json_type_to_python():
         generate_schemas.map_json_type_to_python(
             "val",
             {
-                "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString"
+                "$ref": (
+                    "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString"
+                )
             },
         )
         == "DynamicString"
@@ -423,7 +427,8 @@ def test_generate_basic_catalog_styles():
     assert "class Theme(BaseModel):" in code
     assert (
         'primary_color: Optional[str] = Field(None, alias="primaryColor",'
-        ' description="Test color.")' in code
+        ' description="Test color.")'
+        in code
     )
 
 
@@ -493,13 +498,11 @@ def test_generate_client_to_server():
                 "required": ["name"],
             },
             "error": {
-                "oneOf": [
-                    {
-                        "title": "Validation Failed Error",
-                        "properties": {"code": {"const": "VALIDATION_FAILED"}},
-                        "required": ["code"],
-                    }
-                ]
+                "oneOf": [{
+                    "title": "Validation Failed Error",
+                    "properties": {"code": {"const": "VALIDATION_FAILED"}},
+                    "required": ["code"],
+                }]
             },
         }
     }
