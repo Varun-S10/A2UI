@@ -228,7 +228,30 @@ class DirectJsonFormat(InferenceFormat):
                 inline_components = inline_catalog_schema.get(
                     CATALOG_COMPONENTS_KEY, {}
                 )
-                merged_schema[CATALOG_COMPONENTS_KEY].update(inline_components)
+                merged_schema.setdefault(CATALOG_COMPONENTS_KEY, {}).update(inline_components)
+                inline_functions = inline_catalog_schema.get("functions", {})
+                if inline_functions:
+                    merged_schema.setdefault("functions", {}).update(inline_functions)
+
+            if "$defs" in merged_schema and "anyComponent" in merged_schema["$defs"]:
+                components = merged_schema.get(CATALOG_COMPONENTS_KEY) or {}
+                merged_schema["$defs"]["anyComponent"] = {
+                    "oneOf": [
+                        {"$ref": f"#/{CATALOG_COMPONENTS_KEY}/{name}"}
+                        for name in sorted(components.keys())
+                    ],
+                    "discriminator": {"propertyName": "component"},
+                }
+
+            if "$defs" in merged_schema and "anyFunction" in merged_schema["$defs"]:
+                functions = merged_schema.get("functions") or {}
+                if functions:
+                    merged_schema["$defs"]["anyFunction"] = {
+                        "oneOf": [
+                            {"$ref": f"#/functions/{name}"}
+                            for name in sorted(functions.keys())
+                        ],
+                    }
 
             return A2uiCatalog(
                 version=self._version,
@@ -238,6 +261,7 @@ class DirectJsonFormat(InferenceFormat):
                 common_types_schema=self._common_types_schema,
                 experiments=self.experiments,
             )
+
 
         if not client_supported_catalog_ids:
             return self._supported_catalogs[0]
