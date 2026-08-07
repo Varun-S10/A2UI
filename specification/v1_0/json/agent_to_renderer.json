@@ -157,7 +157,7 @@
           "const": "v1.0"
         },
         "functionCallId": {
-          "$ref": "common_types.json#/$defs/CallId",
+          "$ref": "https://a2ui.org/specification/v1_0/common_types.json#/$defs/CallId",
           "description": "Unique ID for the instance of this function call. MUST be copied verbatim into the functionResponse or error."
         },
         "wantResponse": {
@@ -167,7 +167,7 @@
         "callFunction": {
           "allOf": [
             {
-              "$ref": "common_types.json#/$defs/FunctionCall"
+              "$ref": "https://a2ui.org/specification/v1_0/common_types.json#/$defs/FunctionCall"
             }
           ],
           "required": ["call"],

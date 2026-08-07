@@ -302,12 +302,16 @@ def test_unrecognized_type_and_mismatched_properties_with_models():
 
     # 2. Unrecognized Properties (extra=forbid)
     with pytest.raises((ValidationError, ValueError)) as exc_info:
-        _val(catalog).validate_components([{
-            "id": "c1",
-            "component": "Card",
-            "elevation": 1,
-            "extraProperty": "garbage",
-        }])
+        _val(catalog).validate_components(
+            [
+                {
+                    "id": "c1",
+                    "component": "Card",
+                    "elevation": 1,
+                    "extraProperty": "garbage",
+                }
+            ]
+        )
     assert (
         "extra_forbidden" in str(exc_info.value)
         or "extra" in str(exc_info.value).lower()
@@ -428,33 +432,45 @@ def test_nested_function_validation_with_models():
     )
 
     # 1. Test validate_components Valid with nested function call
-    _val(cat).validate_components([{
-        "id": "root",
-        "component": "OuterComp",
-        "inner": {
-            "call": "custom",
-            "args": {"param": 123},
-        },
-    }])
+    _val(cat).validate_components(
+        [
+            {
+                "id": "root",
+                "component": "OuterComp",
+                "inner": {
+                    "call": "custom",
+                    "args": {"param": 123},
+                },
+            }
+        ]
+    )
 
     # 2. Rejects unrecognized nested catalog function call
     with pytest.raises(ValueError, match="Unknown function: unrecognizedFunctionName"):
-        _val(cat).validate_components([{
-            "id": "root",
-            "component": "OuterComp",
-            "inner": {"call": "unrecognizedFunctionName", "args": {}},
-        }])
+        _val(cat).validate_components(
+            [
+                {
+                    "id": "root",
+                    "component": "OuterComp",
+                    "inner": {"call": "unrecognizedFunctionName", "args": {}},
+                }
+            ]
+        )
 
     # 3. Rejects mismatched parameters inside nested function calls
     with pytest.raises(ValueError, match="Invalid function call 'custom'"):
-        _val(cat).validate_components([{
-            "id": "root",
-            "component": "OuterComp",
-            "inner": {
-                "call": "custom",
-                "args": {"param": "not-an-int"},
-            },
-        }])
+        _val(cat).validate_components(
+            [
+                {
+                    "id": "root",
+                    "component": "OuterComp",
+                    "inner": {
+                        "call": "custom",
+                        "args": {"param": "not-an-int"},
+                    },
+                }
+            ]
+        )
 
 
 def test_nested_function_validation_from_json():
@@ -504,25 +520,33 @@ def test_nested_function_validation_from_json():
 
     # 1. Rejects unrecognized nested catalog function call
     with pytest.raises(ValueError, match="Unknown function: unrecognizedFunctionName"):
-        _val(catalog).validate_components([{
-            "id": "root",
-            "component": "Text",
-            "text": {"call": "unrecognizedFunctionName", "args": {}},
-        }])
+        _val(catalog).validate_components(
+            [
+                {
+                    "id": "root",
+                    "component": "Text",
+                    "text": {"call": "unrecognizedFunctionName", "args": {}},
+                }
+            ]
+        )
 
     # 2. Rejects mismatched parameters inside nested function calls
     with pytest.raises(
         ValueError,
         match="Invalid function call 'regex'|pattern|Additional properties",
     ):
-        _val(catalog).validate_components([{
-            "id": "root",
-            "component": "Text",
-            "text": {
-                "call": "regex",
-                "args": {"value": "Alice", "unmapped": "garbage"},
-            },
-        }])
+        _val(catalog).validate_components(
+            [
+                {
+                    "id": "root",
+                    "component": "Text",
+                    "text": {
+                        "call": "regex",
+                        "args": {"value": "Alice", "unmapped": "garbage"},
+                    },
+                }
+            ]
+        )
 
 
 # ==============================================================================
@@ -621,9 +645,17 @@ def test_extract_ref_fields_dynamic_json():
                 "properties": {
                     "component": {"const": "AdvancedLayout"},
                     # 1. Direct $ref to ComponentId (custom property name)
-                    "customChild": {"$ref": "common_types.json#/$defs/ComponentId"},
+                    "customChild": {
+                        "$ref": (
+                            "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentId"
+                        )
+                    },
                     # 2. Direct $ref to ChildList (custom property name)
-                    "customList": {"$ref": "common_types.json#/$defs/ChildList"},
+                    "customList": {
+                        "$ref": (
+                            "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ChildList"
+                        )
+                    },
                     # 3. Nested $ref to ComponentId inside allOf
                     "nestedChild": {"allOf": [{"$ref": "#/$defs/ComponentId"}]},
                     # 4. Nested $ref to ChildList inside oneOf
@@ -726,7 +758,11 @@ def test_extract_ref_fields_common_types_resolution():
                 "type": "object",
                 "properties": {
                     "component": {"const": "Box"},
-                    "color": {"$ref": "common_types.json#/$defs/ColorHex"},
+                    "color": {
+                        "$ref": (
+                            "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ColorHex"
+                        )
+                    },
                 },
                 "required": ["color"],
                 "additionalProperties": False,
@@ -955,28 +991,36 @@ def test_basic_catalog_nested_function_validation():
 
     # 1. Rejects unrecognized nested catalog function call
     with pytest.raises(ValueError, match="Unknown function: unrecognizedFunctionName"):
-        _val(catalog).validate_components([{
-            "id": "root",
-            "component": "Text",
-            "text": {"call": "unrecognizedFunctionName", "args": {}},
-        }])
+        _val(catalog).validate_components(
+            [
+                {
+                    "id": "root",
+                    "component": "Text",
+                    "text": {"call": "unrecognizedFunctionName", "args": {}},
+                }
+            ]
+        )
 
     # 2. Rejects mismatched parameters for recognized nested function call
     # formatNumber expects decimal parameter to be a float/number or binding, not a boolean/string!
     with pytest.raises(
         ValueError, match="Invalid function call 'formatNumber'|decimal"
     ):
-        _val(catalog).validate_components([{
-            "id": "root",
-            "component": "Text",
-            "text": {
-                "call": "formatNumber",
-                "args": {
-                    "value": 123.45,
-                    "decimals": "invalid-string-instead-of-number",
-                },
-            },
-        }])
+        _val(catalog).validate_components(
+            [
+                {
+                    "id": "root",
+                    "component": "Text",
+                    "text": {
+                        "call": "formatNumber",
+                        "args": {
+                            "value": 123.45,
+                            "decimals": "invalid-string-instead-of-number",
+                        },
+                    },
+                }
+            ]
+        )
 
 
 def test_basic_catalog_extract_ref_fields():
