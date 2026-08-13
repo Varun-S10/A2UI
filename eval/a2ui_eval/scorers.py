@@ -44,7 +44,10 @@ from a2ui.parser.errors import A2uiCompilationError
 try:
     from a2ui.inference_formats.experimental.express.errors import ExpressCompilerError
 except ImportError:
-    ExpressCompilerError = ()  # type: ignore[misc,assignment]
+
+    class ExpressCompilerError(Exception):  # type: ignore[no-redef]
+        pass
+
 
 from a2ui.inference_formats.direct_json.format import DirectJsonFormat
 from a2ui.schema.catalog import CatalogConfig
