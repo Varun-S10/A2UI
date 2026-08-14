@@ -33,7 +33,7 @@ class MessageProcessor<T extends ComponentApi> {
     void Function(A2uiClientAction)? onAction,
     Clock? clock,
     SurfaceGroupModel<T>? groupModel,
-  })  : clock = clock ?? systemClock,
+  })  : clock = clock ?? groupModel?.clock ?? systemClock,
         groupModel = groupModel ?? SurfaceGroupModel<T>(clock: clock) {
     if (onAction != null) {
       this.groupModel.onAction.addListener(onAction);
