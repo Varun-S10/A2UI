@@ -218,16 +218,35 @@ function parseRegexAst(pattern: string): RootNode {
         i++;
         const esc = pattern[i] || '';
         i++;
-        const escNode: EscapeNode = {
-          type: 'Escape',
-          value: esc,
-          quantifier: null,
-        };
-        parseQuantifier(escNode);
-        elements.push(escNode);
+        if (['d', 'w', 's', 'D', 'W', 'S'].includes(esc)) {
+          const escNode: EscapeNode = {
+            type: 'Escape',
+            value: esc,
+            quantifier: null,
+          };
+          parseQuantifier(escNode);
+          elements.push(escNode);
+        } else {
+          const litNode: LiteralNode = {
+            type: 'Literal',
+            value: esc,
+            quantifier: null,
+          };
+          parseQuantifier(litNode);
+          elements.push(litNode);
+        }
       } else if (char === '^' || char === '$') {
         i++;
         elements.push({type: 'Anchor', value: char});
+      } else if (char === '.') {
+        i++;
+        const dotNode: EscapeNode = {
+          type: 'Escape',
+          value: '.',
+          quantifier: null,
+        };
+        parseQuantifier(dotNode);
+        elements.push(dotNode);
       } else {
         const lit = pattern[i];
         i++;
@@ -277,12 +296,18 @@ function parseRegexAst(pattern: string): RootNode {
       }
       if (i < pattern.length && pattern[i] === '}') {
         i++;
-        quant = {
-          raw: pattern.slice(start, i),
-          min: isNaN(min) ? 1 : min,
-          max: isNaN(max) ? Infinity : max,
-          lazy: false,
-        };
+        if (!isNaN(min) && !isNaN(max)) {
+          quant = {
+            raw: pattern.slice(start, i),
+            min,
+            max,
+            lazy: false,
+          };
+        } else {
+          i = start;
+        }
+      } else {
+        i = start;
       }
     }
 
@@ -335,11 +360,11 @@ function hasDisjointSeparator(groupNode: GroupNode): boolean {
 
     const firstIsSep =
       (first.type === 'Literal' ||
-        (first.type === 'Escape' && !['d', 'w', 's'].includes(first.value))) &&
+        (first.type === 'Escape' && !['d', 'w', 's', '.'].includes(first.value))) &&
       !('quantifier' in first && first.quantifier);
     const lastIsSep =
       (last.type === 'Literal' ||
-        (last.type === 'Escape' && !['d', 'w', 's'].includes(last.value))) &&
+        (last.type === 'Escape' && !['d', 'w', 's', '.'].includes(last.value))) &&
       !('quantifier' in last && last.quantifier);
 
     if (!firstIsSep && !lastIsSep) return false;
@@ -352,8 +377,9 @@ function hasDisjointSeparator(groupNode: GroupNode): boolean {
         ? last.value
         : (last as EscapeNode).value;
 
+    const sepEl = firstIsSep ? first : last;
     for (const el of branch.elements) {
-      if (el !== first && el !== last && 'quantifier' in el && el.quantifier) {
+      if (el !== sepEl && 'quantifier' in el && el.quantifier) {
         if (nodeMatchesChar(el, sep)) {
           return false;
         }
@@ -369,6 +395,7 @@ function nodeMatchesChar(node: RegexNode, char: string): boolean {
     return matchesCharacterClass(node.content, node.negated, char);
   }
   if (node.type === 'Escape') {
+    if (node.value === '.') return true;
     if (node.value === 'd' && /^[0-9]$/.test(char)) return true;
     if (node.value === 'w' && /^[a-zA-Z0-9_]$/.test(char)) return true;
     if (node.value === 's' && /^\s$/.test(char)) return true;
@@ -400,6 +427,7 @@ function branchesOverlap(b1: SequenceNode, b2: SequenceNode): boolean {
   const s2 = getFirstCharSummary(b2);
 
   if (s1.any || s2.any) return true;
+  if (s1.escape === '.' || s2.escape === '.') return true;
   if (s1.literal && s2.literal) {
     return s1.literal === s2.literal;
   }
