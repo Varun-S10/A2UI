@@ -68,6 +68,10 @@ export abstract class BasicCatalogComponent<
 
   @HostBinding('style.--a2ui-color-primary')
   get primaryColorStyle(): string | null {
-    return this.primaryColor() || null;
+    const color = this.primaryColor();
+    if (typeof color === 'string' && /^#[0-9a-fA-F]{6}$/.test(color)) {
+      return color;
+    }
+    return null;
   }
 }

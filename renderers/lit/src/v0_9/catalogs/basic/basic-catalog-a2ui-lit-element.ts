@@ -53,7 +53,7 @@ export abstract class BasicCatalogA2uiLitElement<
     }
 
     const primaryColor = this.context?.theme?.primaryColor;
-    if (primaryColor) {
+    if (typeof primaryColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(primaryColor)) {
       this.style.setProperty('--a2ui-color-primary', primaryColor);
       this.style.setProperty(
         '--a2ui-color-primary-light',

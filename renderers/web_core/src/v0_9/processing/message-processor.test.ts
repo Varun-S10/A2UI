@@ -19,7 +19,7 @@ import {describe, it, beforeEach} from 'node:test';
 import {MessageProcessor, formatZodIssue} from './message-processor.js';
 import {Catalog, ComponentApi} from '../catalog/types.js';
 import {CardApi, RowApi, TabsApi} from '../basic_catalog/components/basic_components.js';
-import {ButtonApi} from '../basic_catalog/index.js';
+import {ButtonApi, BasicCatalogThemeSchema} from '../basic_catalog/index.js';
 import {A2uiValidationError} from '../errors.js';
 import {z} from 'zod';
 
@@ -253,6 +253,73 @@ describe('MessageProcessor', () => {
     assert.ok(surface);
     assert.strictEqual(surface.id, 's1');
     assert.strictEqual(surface.sendDataModel, false);
+  });
+
+  it('validates surface theme against catalog themeSchema on createSurface', () => {
+    const themedCatalog = new Catalog('themed-cat', [], [], BasicCatalogThemeSchema);
+    const proc = new MessageProcessor([themedCatalog]);
+
+    // Valid theme
+    proc.processMessages([
+      {
+        version: 'v0.9',
+        createSurface: {
+          surfaceId: 'valid-surface',
+          catalogId: 'themed-cat',
+          theme: {
+            primaryColor: '#00BFFF',
+            agentDisplayName: 'Test Agent',
+            customExtra: 'allowed-by-passthrough',
+          },
+        },
+      },
+    ]);
+    const surface = proc.model.getSurface('valid-surface');
+    assert.ok(surface);
+    assert.strictEqual(surface.theme?.primaryColor, '#00BFFF');
+    assert.strictEqual(surface.theme?.agentDisplayName, 'Test Agent');
+
+    // Invalid theme: hex color format violation / CSS injection attempt
+    assert.throws(
+      () => {
+        proc.processMessages([
+          {
+            version: 'v0.9',
+            createSurface: {
+              surfaceId: 'invalid-surface-1',
+              catalogId: 'themed-cat',
+              theme: {
+                primaryColor: 'url(https://attacker.example/beacon)',
+              },
+            },
+          },
+        ]);
+      },
+      (err: any) =>
+        err instanceof A2uiValidationError &&
+        err.message.includes("Validation failed for surface 'invalid-surface-1' theme"),
+    );
+    assert.strictEqual(proc.model.getSurface('invalid-surface-1'), undefined);
+
+    // Invalid theme: wrong type
+    assert.throws(
+      () => {
+        proc.processMessages([
+          {
+            version: 'v0.9',
+            createSurface: {
+              surfaceId: 'invalid-surface-2',
+              catalogId: 'themed-cat',
+              theme: {
+                primaryColor: 123,
+              },
+            },
+          },
+        ]);
+      },
+      (err: any) => err instanceof A2uiValidationError,
+    );
+    assert.strictEqual(proc.model.getSurface('invalid-surface-2'), undefined);
   });
 
   it('creates surface with sendDataModel enabled', () => {

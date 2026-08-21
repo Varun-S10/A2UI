@@ -15,7 +15,7 @@
  */
 
 import {Catalog} from '@a2ui/web_core/v0_9';
-import {BASIC_FUNCTIONS} from '@a2ui/web_core/v0_9/basic_catalog';
+import {BASIC_FUNCTIONS, BasicCatalogThemeSchema} from '@a2ui/web_core/v0_9/basic_catalog';
 import {LitComponentApi} from '../../types.js';
 
 import {A2uiText} from './components/Text.js';
@@ -68,4 +68,5 @@ export const basicCatalog = new Catalog<LitComponentApi>(
     A2uiModal,
   ],
   BASIC_FUNCTIONS,
+  BasicCatalogThemeSchema,
 );

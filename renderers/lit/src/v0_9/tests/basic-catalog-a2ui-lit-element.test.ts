@@ -148,4 +148,27 @@ describe('BasicCatalogA2uiLitElement', () => {
     assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary-hover'), '');
     document.body.removeChild(el);
   });
+
+  it('should ignore invalid primaryColor value from theme', async () => {
+    const el = document.createElement('test-basic-element');
+    document.body.appendChild(el);
+
+    const surfaceInvalidThemeMock = {
+      ...surface,
+      theme: {
+        primaryColor: 'url(https://attacker.example/beacon)',
+      },
+    } as SurfaceModel<LitComponentApi>;
+
+    const contextInvalidTheme = new ComponentContext(surfaceInvalidThemeMock, 'root');
+    await asyncUpdate(el, (e: any) => {
+      e.context = contextInvalidTheme;
+    });
+
+    assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary'), '');
+    assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary-light'), '');
+    assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary-dark'), '');
+    assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary-hover'), '');
+    document.body.removeChild(el);
+  });
 });

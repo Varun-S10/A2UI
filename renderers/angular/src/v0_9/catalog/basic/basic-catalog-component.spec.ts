@@ -89,4 +89,15 @@ describe('BasicCatalogComponent', () => {
     const element = fixture.nativeElement;
     expect(element.style.getPropertyValue('--a2ui-color-primary')).toBe('');
   });
+
+  it('should ignore invalid primaryColor values on host style', () => {
+    const surface = rendererService.surfaceGroup.getSurface('test-surface');
+    surface!.theme.primaryColor = 'url(https://attacker.example/beacon)';
+
+    fixture.componentRef.setInput('surfaceId', 'test-surface');
+    fixture.detectChanges();
+
+    const element = fixture.nativeElement;
+    expect(element.style.getPropertyValue('--a2ui-color-primary')).toBe('');
+  });
 });
