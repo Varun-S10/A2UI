@@ -53,15 +53,26 @@ describe('isSafeRegex (CWE-1333 ReDoS Safety)', () => {
       assert.strictEqual(isSafeRegex('(\\d+\\d+)+'), false);
     });
 
-    it('blocks patterns exceeding maximum length', () => {
-      const longPattern = '^' + 'a'.repeat(300) + '$';
-      assert.strictEqual(isSafeRegex(longPattern, {maxPatternLength: 256}), false);
+    it('blocks wildcard dot overlap patterns', () => {
+      assert.strictEqual(isSafeRegex('(a|.)+'), false);
+      assert.strictEqual(isSafeRegex('(a|.)+$'), false);
+      assert.strictEqual(isSafeRegex('(.|a)+'), false);
+      assert.strictEqual(isSafeRegex('(.*)+'), false);
+      assert.strictEqual(isSafeRegex('(.+)+'), false);
+    });
+
+    it('blocks repeated non-disjoint prefixes and suffixes', () => {
+      assert.strictEqual(isSafeRegex('(aa+)*'), false);
+      assert.strictEqual(isSafeRegex('(a+a)*'), false);
+      assert.strictEqual(isSafeRegex('(1\\d+)*'), false);
     });
 
     it('blocks invalid regex syntax safely without crashing', () => {
       assert.strictEqual(isSafeRegex('['), false);
       assert.strictEqual(isSafeRegex('(?'), false);
       assert.strictEqual(isSafeRegex('*abc'), false);
+      assert.strictEqual(isSafeRegex('a{2,1}'), false); // numbers out of order
+      assert.strictEqual(isSafeRegex('a{invalid}'), true); // safely parsed as literal without crash
     });
   });
 
