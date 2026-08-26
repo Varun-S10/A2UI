@@ -16,7 +16,11 @@
 
 import {ComponentApi, type ComponentId} from '@a2ui/web_core/v0_9';
 import {A2uiLitElement} from '../../a2ui-lit-element.js';
-import {injectBasicCatalogStyles, computeColorVariant} from '@a2ui/web_core/v0_9/basic_catalog';
+import {
+  injectBasicCatalogStyles,
+  computeColorVariant,
+  HEX_COLOR_REGEX,
+} from '@a2ui/web_core/v0_9/basic_catalog';
 
 export type ResolvedChildRef =
   | ComponentId
@@ -53,7 +57,7 @@ export abstract class BasicCatalogA2uiLitElement<
     }
 
     const primaryColor = this.context?.theme?.primaryColor;
-    if (typeof primaryColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(primaryColor)) {
+    if (typeof primaryColor === 'string' && HEX_COLOR_REGEX.test(primaryColor)) {
       this.style.setProperty('--a2ui-color-primary', primaryColor);
       this.style.setProperty(
         '--a2ui-color-primary-light',

@@ -16,7 +16,7 @@
 
 import {z} from 'zod';
 
-export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
+export const HEX_COLOR_REGEX = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 /**
  * Zod schema defining the theme configuration for the basic catalog.
@@ -28,11 +28,11 @@ export const BasicCatalogThemeSchema = z
       .string()
       .regex(
         HEX_COLOR_REGEX,
-        "primaryColor must be a valid 6-character hexadecimal color code (e.g. '#00BFFF')",
+        "primaryColor must be a valid hexadecimal color code (e.g. '#00BFFF' or '#17e')",
       )
       .optional()
       .describe(
-        "The primary brand color used for highlights (e.g., primary buttons, active borders). Renderers may generate variants of this color for different contexts. Format: Hexadecimal code (e.g., '#00BFFF').",
+        "The primary brand color used for highlights (e.g., primary buttons, active borders). Renderers may generate variants of this color for different contexts. Format: Hexadecimal code (e.g., '#00BFFF' or '#17e').",
       ),
     iconUrl: z
       .string()

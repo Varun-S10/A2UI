@@ -116,7 +116,7 @@ export declare interface CatalogInterface<
   readonly id: string;
   readonly components: ReadonlyMap<string, T>;
   readonly functions: ReadonlyMap<string, F>;
-  readonly themeSchema?: z.ZodObject<any>;
+  readonly themeSchema?: z.ZodTypeAny;
   readonly invoker: FunctionInvoker;
 }
 
@@ -151,7 +151,7 @@ export class Catalog<
   /**
    * The schema for theme parameters used by this catalog.
    */
-  readonly themeSchema?: z.ZodObject<any>;
+  readonly themeSchema?: z.ZodTypeAny;
 
   /**
    * A ready-to-use FunctionInvoker callback that delegates to this catalog's functions.
@@ -159,7 +159,7 @@ export class Catalog<
    */
   readonly invoker: FunctionInvoker;
 
-  constructor(id: string, components: T[], functions: F[] = [], themeSchema?: z.ZodObject<any>) {
+  constructor(id: string, components: T[], functions: F[] = [], themeSchema?: z.ZodTypeAny) {
     this.id = id;
 
     const compMap = new Map<string, T>();

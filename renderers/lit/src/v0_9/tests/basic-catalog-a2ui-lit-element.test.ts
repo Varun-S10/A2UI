@@ -92,13 +92,14 @@ describe('BasicCatalogA2uiLitElement', () => {
     surface = processor.model.getSurface('test-surface')!;
   });
 
-  it('should apply primary color from theme', async () => {
+  it('should apply primary color from theme for 3, 6, and 8 character hex colors', async () => {
     const el = document.createElement('test-basic-element');
     document.body.appendChild(el);
 
-    const context = new ComponentContext(surface, 'root');
+    // 6-character hex
+    const context6 = new ComponentContext(surface, 'root');
     await asyncUpdate(el, (e: any) => {
-      e.context = context;
+      e.context = context6;
     });
 
     assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary'), '#ff0000');
@@ -114,6 +115,27 @@ describe('BasicCatalogA2uiLitElement', () => {
       el.style.getPropertyValue('--a2ui-color-primary-hover'),
       'light-dark(var(--a2ui-color-primary-dark), var(--a2ui-color-primary-light))',
     );
+
+    // 3-character hex
+    const surface3Mock = {
+      ...surface,
+      theme: {primaryColor: '#17e'},
+    } as SurfaceModel<LitComponentApi>;
+    await asyncUpdate(el, (e: any) => {
+      e.context = new ComponentContext(surface3Mock, 'root');
+    });
+    assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary'), '#17e');
+
+    // 8-character hex
+    const surface8Mock = {
+      ...surface,
+      theme: {primaryColor: '#ff000080'},
+    } as SurfaceModel<LitComponentApi>;
+    await asyncUpdate(el, (e: any) => {
+      e.context = new ComponentContext(surface8Mock, 'root');
+    });
+    assert.strictEqual(el.style.getPropertyValue('--a2ui-color-primary'), '#ff000080');
+
     document.body.removeChild(el);
   });
 

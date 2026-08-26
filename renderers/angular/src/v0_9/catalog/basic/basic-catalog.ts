@@ -61,6 +61,7 @@ import {
   SliderApi,
   DateTimeInputApi,
   BasicCatalogThemeSchema,
+  type BasicCatalogTheme,
 } from '@a2ui/web_core/v0_9/basic_catalog';
 import {FunctionImplementation} from '@a2ui/web_core/v0_9';
 import {z} from 'zod';
@@ -131,7 +132,7 @@ export interface BasicCatalogOptions {
   /**
    * Optional theme schema to override default basic catalog theme schema.
    */
-  themeSchema?: z.ZodObject<any>;
+  themeSchema?: z.ZodType<BasicCatalogTheme>;
 }
 
 /**

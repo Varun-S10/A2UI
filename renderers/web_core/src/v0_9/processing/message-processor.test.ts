@@ -259,12 +259,12 @@ describe('MessageProcessor', () => {
     const themedCatalog = new Catalog('themed-cat', [], [], BasicCatalogThemeSchema);
     const proc = new MessageProcessor([themedCatalog]);
 
-    // Valid theme
+    // Valid themes: 6-char hex, 3-char hex, 8-char hex (with alpha)
     proc.processMessages([
       {
         version: 'v0.9',
         createSurface: {
-          surfaceId: 'valid-surface',
+          surfaceId: 'valid-surface-6char',
           catalogId: 'themed-cat',
           theme: {
             primaryColor: '#00BFFF',
@@ -273,11 +273,39 @@ describe('MessageProcessor', () => {
           },
         },
       },
+      {
+        version: 'v0.9',
+        createSurface: {
+          surfaceId: 'valid-surface-3char',
+          catalogId: 'themed-cat',
+          theme: {
+            primaryColor: '#17e',
+          },
+        },
+      },
+      {
+        version: 'v0.9',
+        createSurface: {
+          surfaceId: 'valid-surface-8char',
+          catalogId: 'themed-cat',
+          theme: {
+            primaryColor: '#00BFFF80',
+          },
+        },
+      },
     ]);
-    const surface = proc.model.getSurface('valid-surface');
-    assert.ok(surface);
-    assert.strictEqual(surface.theme?.primaryColor, '#00BFFF');
-    assert.strictEqual(surface.theme?.agentDisplayName, 'Test Agent');
+    const surface6 = proc.model.getSurface('valid-surface-6char');
+    assert.ok(surface6);
+    assert.strictEqual(surface6.theme?.primaryColor, '#00BFFF');
+    assert.strictEqual(surface6.theme?.agentDisplayName, 'Test Agent');
+
+    const surface3 = proc.model.getSurface('valid-surface-3char');
+    assert.ok(surface3);
+    assert.strictEqual(surface3.theme?.primaryColor, '#17e');
+
+    const surface8 = proc.model.getSurface('valid-surface-8char');
+    assert.ok(surface8);
+    assert.strictEqual(surface8.theme?.primaryColor, '#00BFFF80');
 
     // Invalid theme: hex color format violation / CSS injection attempt
     assert.throws(
@@ -301,6 +329,27 @@ describe('MessageProcessor', () => {
     );
     assert.strictEqual(proc.model.getSurface('invalid-surface-1'), undefined);
 
+    // Invalid theme: invalid hex lengths (e.g. 2, 5, 7 chars)
+    for (const invalidColor of ['#12', '#12345', '#1234567', '#gggggg', 'red']) {
+      assert.throws(
+        () => {
+          proc.processMessages([
+            {
+              version: 'v0.9',
+              createSurface: {
+                surfaceId: `invalid-surface-${invalidColor}`,
+                catalogId: 'themed-cat',
+                theme: {
+                  primaryColor: invalidColor,
+                },
+              },
+            },
+          ]);
+        },
+        (err: any) => err instanceof A2uiValidationError,
+      );
+    }
+
     // Invalid theme: wrong type
     assert.throws(
       () => {
@@ -320,6 +369,33 @@ describe('MessageProcessor', () => {
       (err: any) => err instanceof A2uiValidationError,
     );
     assert.strictEqual(proc.model.getSurface('invalid-surface-2'), undefined);
+  });
+
+  it('uses parsed and validated data output from themeSchema on createSurface', () => {
+    const transformSchema = z.object({
+      primaryColor: z.string().transform(c => c.toUpperCase()),
+      defaultedField: z.string().default('default-val'),
+    });
+    const transformingCatalog = new Catalog('transform-cat', [], [], transformSchema);
+    const proc = new MessageProcessor([transformingCatalog]);
+
+    proc.processMessages([
+      {
+        version: 'v0.9',
+        createSurface: {
+          surfaceId: 'transform-surface',
+          catalogId: 'transform-cat',
+          theme: {
+            primaryColor: '#abcdef',
+          },
+        },
+      },
+    ]);
+
+    const surface = proc.model.getSurface('transform-surface');
+    assert.ok(surface);
+    assert.strictEqual(surface.theme?.primaryColor, '#ABCDEF');
+    assert.strictEqual((surface.theme as any)?.defaultedField, 'default-val');
   });
 
   it('creates surface with sendDataModel enabled', () => {
