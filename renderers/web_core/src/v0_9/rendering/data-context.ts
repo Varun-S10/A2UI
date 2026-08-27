@@ -35,6 +35,8 @@ import {SurfaceModel} from '../state/surface-model.js';
 
 import {CatalogInterface} from '../catalog/types.js';
 
+const schemaKeysCache = new WeakMap<z.ZodTypeAny, Set<string> | null>();
+
 /**
  * Extracts declared property keys from a Zod schema if it represents an object schema
  * with a known, fixed set of keys (e.g. z.ZodObject, z.ZodEffects wrapping z.ZodObject, etc.)
@@ -44,63 +46,72 @@ import {CatalogInterface} from '../catalog/types.js';
  * or if the keys cannot be statically determined.
  */
 export function getKnownSchemaKeys(schema: z.ZodTypeAny): Set<string> | null {
-  let current: any = schema;
-  while (current) {
-    if (current instanceof z.ZodObject || current._def?.typeName === 'ZodObject') {
-      // If passthrough is enabled, arbitrary keys are allowed.
-      if (current._def?.unknownKeys === 'passthrough') {
+  if (schemaKeysCache.has(schema)) {
+    return schemaKeysCache.get(schema) as Set<string> | null;
+  }
+
+  const result = ((): Set<string> | null => {
+    let current: any = schema;
+    while (current) {
+      if (current instanceof z.ZodObject || current._def?.typeName === 'ZodObject') {
+        // If passthrough is enabled, arbitrary keys are allowed.
+        if (current._def?.unknownKeys === 'passthrough') {
+          return null;
+        }
+        const shape = typeof current.shape === 'function' ? current.shape() : current.shape;
+        if (shape && typeof shape === 'object') {
+          return new Set(Object.keys(shape));
+        }
         return null;
       }
-      const shape = typeof current.shape === 'function' ? current.shape() : current.shape;
-      if (shape && typeof shape === 'object') {
-        return new Set(Object.keys(shape));
+      if (current instanceof z.ZodEffects || current._def?.typeName === 'ZodEffects') {
+        current = current._def.schema;
+        continue;
+      }
+      if (
+        current instanceof z.ZodOptional ||
+        current instanceof z.ZodNullable ||
+        current._def?.typeName === 'ZodOptional' ||
+        current._def?.typeName === 'ZodNullable'
+      ) {
+        current = current._def.innerType;
+        continue;
+      }
+      if (current instanceof z.ZodDefault || current._def?.typeName === 'ZodDefault') {
+        current = current._def.innerType;
+        continue;
+      }
+      if (current instanceof z.ZodCatch || current._def?.typeName === 'ZodCatch') {
+        current = current._def.innerType;
+        continue;
+      }
+      if (current instanceof z.ZodIntersection || current._def?.typeName === 'ZodIntersection') {
+        const leftKeys = getKnownSchemaKeys(current._def.left);
+        const rightKeys = getKnownSchemaKeys(current._def.right);
+        if (!leftKeys || !rightKeys) {
+          return null;
+        }
+        return new Set([...leftKeys, ...rightKeys]);
+      }
+      if (current instanceof z.ZodUnion || current._def?.typeName === 'ZodUnion') {
+        const options: z.ZodTypeAny[] = current._def.options;
+        const allKeys = new Set<string>();
+        for (const opt of options) {
+          const k = getKnownSchemaKeys(opt);
+          if (!k) return null; // If any union branch allows arbitrary keys, do not filter.
+          for (const key of k) {
+            allKeys.add(key);
+          }
+        }
+        return allKeys;
       }
       return null;
     }
-    if (current instanceof z.ZodEffects || current._def?.typeName === 'ZodEffects') {
-      current = current._def.schema;
-      continue;
-    }
-    if (
-      current instanceof z.ZodOptional ||
-      current instanceof z.ZodNullable ||
-      current._def?.typeName === 'ZodOptional' ||
-      current._def?.typeName === 'ZodNullable'
-    ) {
-      current = current._def.innerType;
-      continue;
-    }
-    if (current instanceof z.ZodDefault || current._def?.typeName === 'ZodDefault') {
-      current = current._def.innerType;
-      continue;
-    }
-    if (current instanceof z.ZodCatch || current._def?.typeName === 'ZodCatch') {
-      current = current._def.innerType;
-      continue;
-    }
-    if (current instanceof z.ZodIntersection || current._def?.typeName === 'ZodIntersection') {
-      const leftKeys = getKnownSchemaKeys(current._def.left);
-      const rightKeys = getKnownSchemaKeys(current._def.right);
-      if (leftKeys && rightKeys) {
-        return new Set([...leftKeys, ...rightKeys]);
-      }
-      return leftKeys ?? rightKeys;
-    }
-    if (current instanceof z.ZodUnion || current._def?.typeName === 'ZodUnion') {
-      const options: z.ZodTypeAny[] = current._def.options;
-      const allKeys = new Set<string>();
-      for (const opt of options) {
-        const k = getKnownSchemaKeys(opt);
-        if (!k) return null; // If any union branch allows arbitrary keys, do not filter.
-        for (const key of k) {
-          allKeys.add(key);
-        }
-      }
-      return allKeys;
-    }
     return null;
-  }
-  return null;
+  })();
+
+  schemaKeysCache.set(schema, result);
+  return result;
 }
 
 /**

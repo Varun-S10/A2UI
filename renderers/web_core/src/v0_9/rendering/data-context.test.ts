@@ -560,6 +560,18 @@ describe('DataContext', () => {
 
       const unionSchema = z.union([z.object({x: z.string()}), z.object({y: z.number()})]);
       assert.deepStrictEqual(getKnownSchemaKeys(unionSchema), new Set(['x', 'y']));
+
+      const intersectionSchema = z.intersection(
+        z.object({a: z.string()}),
+        z.object({b: z.number()}),
+      );
+      assert.deepStrictEqual(getKnownSchemaKeys(intersectionSchema), new Set(['a', 'b']));
+
+      const intersectionWithPassthrough = z.intersection(
+        z.object({a: z.string()}),
+        z.object({b: z.number()}).passthrough(),
+      );
+      assert.strictEqual(getKnownSchemaKeys(intersectionWithPassthrough), null);
     });
 
     it('filterFunctionArgs strips unknown keys when schema is available', () => {
