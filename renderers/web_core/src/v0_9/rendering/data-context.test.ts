@@ -469,6 +469,27 @@ describe('DataContext', () => {
       assert.strictEqual(dispatchedError.details, undefined);
     });
 
+    it('handles null or undefined thrown values gracefully without crashing', () => {
+      const invokerThrowingNull = () => {
+        throw null;
+      };
+      let dispatchedError: any = null;
+      const ctx = createTestDataContext(model, '/', invokerThrowingNull, err => {
+        dispatchedError = err;
+      });
+
+      ctx.resolveDynamicValue({
+        call: 'fail',
+        args: {},
+        returnType: 'any',
+      });
+
+      assert.ok(dispatchedError);
+      assert.strictEqual(dispatchedError.code, 'EXPRESSION_ERROR');
+      assert.strictEqual(dispatchedError.message, 'An unexpected error occurred in function fail.');
+      assert.strictEqual(dispatchedError.details, undefined);
+    });
+
     it('dispatches A2uiExpressionError to surface', () => {
       const invokerWithExpressionError = () => {
         throw new A2uiExpressionError('Custom expr error', 'custom_func');
