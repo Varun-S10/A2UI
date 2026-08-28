@@ -421,7 +421,7 @@ describe('DataContext', () => {
     it('dispatches generic Error as EXPRESSION_ERROR to surface', () => {
       const invokerWithRegularError = () => {
         const err = new Error('Generic failure');
-        err.stack = 'Mock stack trace';
+        err.stack = 'Mock stack trace containing secret paths';
         throw err;
       };
       let dispatchedError: any = null;
@@ -440,9 +440,33 @@ describe('DataContext', () => {
       assert.strictEqual(dispatchedError.code, 'EXPRESSION_ERROR');
       assert.strictEqual(dispatchedError.expression, 'fail');
       assert.strictEqual(dispatchedError.message, 'Generic failure');
-      assert.deepStrictEqual(dispatchedError.details, {
-        stack: 'Mock stack trace',
+      // Ensure stack trace is NOT leaked in details (CWE-209 prevention)
+      assert.strictEqual(dispatchedError.details, undefined);
+    });
+
+    it('does not disclose V8 stack traces in surface error details (Issue #2385)', () => {
+      const invokerThrowingRangeError = () => {
+        throw new RangeError('toFixed() digits argument must be between 0 and 100');
+      };
+      let dispatchedError: any = null;
+      const ctx = createTestDataContext(model, '/', invokerThrowingRangeError, err => {
+        dispatchedError = err;
       });
+
+      ctx.resolveDynamicValue({
+        call: 'formatNumber',
+        args: {value: 123, decimals: 200},
+        returnType: 'string',
+      });
+
+      assert.ok(dispatchedError);
+      assert.strictEqual(dispatchedError.code, 'EXPRESSION_ERROR');
+      assert.strictEqual(dispatchedError.expression, 'formatNumber');
+      assert.strictEqual(
+        dispatchedError.message,
+        'toFixed() digits argument must be between 0 and 100',
+      );
+      assert.strictEqual(dispatchedError.details, undefined);
     });
 
     it('dispatches A2uiExpressionError to surface', () => {

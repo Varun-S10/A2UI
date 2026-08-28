@@ -364,7 +364,6 @@ export class DataContext {
         code: 'EXPRESSION_ERROR',
         message: e.message ?? `An unexpected error occurred in function ${name}.`,
         expression: name,
-        details: {stack: e.stack},
       });
     }
   }
