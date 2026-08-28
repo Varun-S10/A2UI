@@ -543,8 +543,9 @@ describe('DataContext', () => {
     });
 
     it('guards against excessive recursion in resolveDynamicValue (Issue #2388)', () => {
+      assert.strictEqual(MAX_DYNAMIC_VALUE_DEPTH, 20);
       let nested: any = {path: '/val'};
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i <= MAX_DYNAMIC_VALUE_DEPTH + 10; i++) {
         nested = {call: 'wrap', args: {v: nested}};
       }
 
