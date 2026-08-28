@@ -158,6 +158,12 @@ export type ResolveA2uiProps<T> = (T extends object
   };
 
 /**
+ * The maximum number of children materialized by dynamic ChildList templates.
+ * Prevents unbounded resource consumption (CWE-400) when bound to massive arrays.
+ */
+export const MAX_DYNAMIC_CHILD_LIST_SIZE = 1000;
+
+/**
  * The Generic Binder is a framework-agnostic engine that transforms raw A2UI JSON payload
  * configurations into a single, cohesive reactive stream of strongly-typed `ResolvedProps`.
  *
@@ -271,7 +277,11 @@ export class GenericBinder<T> {
           const bound = this.context.dataContext.subscribeDynamicValue(
             {path: value.path},
             newVal => {
-              const arr = Array.isArray(newVal) ? newVal : [];
+              const rawArr = Array.isArray(newVal) ? newVal : [];
+              const arr =
+                rawArr.length > MAX_DYNAMIC_CHILD_LIST_SIZE
+                  ? rawArr.slice(0, MAX_DYNAMIC_CHILD_LIST_SIZE)
+                  : rawArr;
               const listContext = this.context.dataContext.nested(value.path);
               const resolvedChildren = arr.map((_, i) => ({
                 id: value.componentId,
@@ -288,7 +298,11 @@ export class GenericBinder<T> {
             bound.unsubscribe();
           }
 
-          const currentArr = Array.isArray(bound.value) ? bound.value : [];
+          const rawCurrent = Array.isArray(bound.value) ? bound.value : [];
+          const currentArr =
+            rawCurrent.length > MAX_DYNAMIC_CHILD_LIST_SIZE
+              ? rawCurrent.slice(0, MAX_DYNAMIC_CHILD_LIST_SIZE)
+              : rawCurrent;
           const listContext = this.context.dataContext.nested(value.path);
           return currentArr.map((_, i) => ({
             id: value.componentId,

@@ -259,6 +259,40 @@ describe('GenericBinder Checkable Trait', () => {
     ]);
   });
 
+  it('should cap dynamic ChildList materialization to MAX_DYNAMIC_CHILD_LIST_SIZE (Issue #2387)', async () => {
+    const {surface} = setupSurfaceAndMocks();
+    const largeList = Array.from({length: 2500}, (_, i) => ({title: `Item ${i}`}));
+    surface.dataModel.set('/largeItems', largeList);
+
+    const structuralSchema = z.object({
+      children: CommonSchemas.ChildList,
+    });
+
+    const compModel = new ComponentModel('c_large', 'Column', {
+      children: {
+        componentId: 'card-item',
+        path: '/largeItems',
+      },
+    });
+    surface.componentsModel.addComponent(compModel);
+
+    const context = new ComponentContext(surface, 'c_large');
+    const binder = new GenericBinder<any>(context, structuralSchema);
+    binder.subscribe(() => {});
+
+    assert.ok(Array.isArray(binder.snapshot.children));
+    assert.strictEqual(binder.snapshot.children.length, 1000);
+    assert.strictEqual(binder.snapshot.children[0].basePath, '/largeItems/0');
+    assert.strictEqual(binder.snapshot.children[999].basePath, '/largeItems/999');
+
+    // Update dynamically with even larger array
+    const evenLargerList = Array.from({length: 5000}, (_, i) => ({title: `Updated ${i}`}));
+    surface.dataModel.set('/largeItems', evenLargerList);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    assert.strictEqual(binder.snapshot.children.length, 1000);
+  });
+
   it('should generate dynamic setters and update data model', () => {
     const {surface} = setupSurfaceAndMocks();
     surface.dataModel.set('/fieldVal', 'initial');

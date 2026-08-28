@@ -316,6 +316,28 @@ describe('NodeResolver conformance (port of test_node_graph.py)', () => {
     }
   });
 
+  it('caps dynamic ChildList resolution to MAX_DYNAMIC_CHILD_LIST_SIZE in NodeResolver (Issue #2387)', () => {
+    const catalog = new Catalog<ComponentApi>('large-list-catalog', [TextApi, ColumnApi], []);
+    const surface = new SurfaceModel('surf-large', catalog);
+    const resolver = new NodeResolver(surface, catalog);
+
+    const items = Array.from({length: 2000}, (_, i) => ({v: `row${i}`}));
+    surface.dataModel.set('/items', items);
+    add(surface, 'root', 'Column', {
+      children: {componentId: 'item-comp', path: '/items'},
+    });
+    add(surface, 'item-comp', 'Text', {text: {path: 'v'}});
+
+    const root = getValue(resolver.rootNode);
+    assert.ok(root);
+    const children = props(root).children as ComponentNode[];
+    assert.strictEqual(children.length, 1000);
+    assert.strictEqual(children[0].dataPath, '/items/0');
+    assert.strictEqual(children[999].dataPath, '/items/999');
+
+    resolver.dispose();
+  });
+
   it('keeps edges distinct when property names and component ids share delimiters', () => {
     // Field 'a' referencing 'b>c' and field 'a>b' referencing 'c' would
     // concatenate to the same edge key without escaping, disposing the
