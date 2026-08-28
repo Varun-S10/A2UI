@@ -17,7 +17,7 @@
 import * as assert from 'node:assert';
 import {describe, it} from 'node:test';
 import {z} from 'zod';
-import {GenericBinder} from './generic-binder.js';
+import {GenericBinder, getSafeChildList, MAX_DYNAMIC_CHILD_LIST_SIZE} from './generic-binder.js';
 import {ComponentContext} from './component-context.js';
 import {SurfaceModel} from '../state/surface-model.js';
 import {Catalog} from '../catalog/types.js';
@@ -350,5 +350,28 @@ describe('GenericBinder Checkable Trait', () => {
       extra: 'another_prop',
     };
     assert.strictEqual(notificationCount, 1);
+  });
+});
+
+describe('getSafeChildList helper function', () => {
+  it('returns an empty array for non-array or nullish inputs', () => {
+    assert.deepStrictEqual(getSafeChildList(null), []);
+    assert.deepStrictEqual(getSafeChildList(undefined), []);
+    assert.deepStrictEqual(getSafeChildList('string'), []);
+    assert.deepStrictEqual(getSafeChildList(123), []);
+    assert.deepStrictEqual(getSafeChildList({}), []);
+  });
+
+  it('returns the same array if length is within MAX_DYNAMIC_CHILD_LIST_SIZE', () => {
+    const list = [1, 2, 3];
+    assert.deepStrictEqual(getSafeChildList(list), [1, 2, 3]);
+  });
+
+  it('slices array to MAX_DYNAMIC_CHILD_LIST_SIZE if length exceeds the limit', () => {
+    const largeList = Array.from({length: 1500}, (_, i) => i);
+    const safe = getSafeChildList(largeList);
+    assert.strictEqual(safe.length, MAX_DYNAMIC_CHILD_LIST_SIZE);
+    assert.strictEqual(safe[0], 0);
+    assert.strictEqual(safe[MAX_DYNAMIC_CHILD_LIST_SIZE - 1], MAX_DYNAMIC_CHILD_LIST_SIZE - 1);
   });
 });

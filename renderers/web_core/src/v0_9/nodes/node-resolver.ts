@@ -22,7 +22,7 @@ import {DataContext} from '../rendering/data-context.js';
 import {
   BehaviorNode,
   GenericBinder,
-  MAX_DYNAMIC_CHILD_LIST_SIZE,
+  getSafeChildList,
   scrapeSchemaBehavior,
 } from '../rendering/generic-binder.js';
 import {
@@ -563,10 +563,7 @@ export class NodeResolver<
           if (!Array.isArray(value)) {
             break;
           }
-          const safeValue =
-            value.length > MAX_DYNAMIC_CHILD_LIST_SIZE
-              ? value.slice(0, MAX_DYNAMIC_CHILD_LIST_SIZE)
-              : value;
+          const safeValue = getSafeChildList(value);
           next[key] = safeValue.map((item, index) => {
             if (typeof item === 'string' && item) {
               return resolveChild(`${escapeIdPart(key)}[${index}]`, item, record.node.dataPath);
