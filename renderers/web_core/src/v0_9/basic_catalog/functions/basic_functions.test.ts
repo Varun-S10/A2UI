@@ -378,6 +378,9 @@ describe('BASIC_FUNCTIONS', () => {
       assert.throws(() => {
         invoke('formatString', {value: 'a'.repeat(10001)}, context);
       });
+      assert.throws(() => {
+        invoke('formatString', {value: '${x}'.repeat(1001)}, context);
+      });
     });
 
     it('formatNumber', () => {
