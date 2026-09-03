@@ -23,11 +23,25 @@
 
 export * from './catalog/function_invoker.js';
 export * from './catalog/types.js';
+export * from './catalog/a2ui-controller.js';
+export * from './catalog/a2ui-lit-element.js';
+export * from './catalog/render-a2ui-node.js';
 export * from './common/events.js';
 export * from './processing/message-processor.js';
 export * from './rendering/component-context.js';
 export * from './rendering/data-context.js';
 export * from './rendering/generic-binder.js';
+// MutableComponentNode is deliberately not re-exported.
+export {
+  isComponentNode,
+  PLACEHOLDER_TYPE,
+  type ComponentNode,
+  type NodeProps,
+  type NodeState,
+} from './nodes/component-node.js';
+export * from './nodes/node-resolver.js';
+export * from './nodes/ref-fields.js';
+export * from './nodes/resolved-binding.js';
 export * from './schema/index.js';
 export * from './state/component-model.js';
 export * from './state/data-model.js';
@@ -35,7 +49,17 @@ export * from './state/surface-components-model.js';
 export * from './state/surface-group-model.js';
 export * from './state/surface-model.js';
 export * from './errors.js';
-export * from './basic_catalog/index.js';
+export * from './basic_catalog/expressions/expression_parser.js';
+export * from './basic_catalog/functions/basic_functions.js';
+export * from './basic_catalog/functions/basic_functions_api.js';
+export * from './basic_catalog/components/basic_components.js';
+export {Context} from './basic_catalog/context/context.js';
+export type {
+  MarkdownRenderer,
+  MarkdownRendererOptions,
+  MarkdownRendererTagClassMap,
+} from './basic_catalog/context/markdown.js';
+export {markdown} from './basic_catalog/directives/directives.js';
 
 export {
   type Signal,
