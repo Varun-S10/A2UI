@@ -68,7 +68,7 @@ def failure_distribution(normalize: bool = False) -> Metric:
     """
 
     def compute(scores: list[SampleScore]) -> dict[str, int | float]:
-        counts: dict[str, int] = {}
+        counts: dict[str, int | float] = {}
         for s in scores:
             cat = (s.score.metadata or {}).get("failure_category")
             if cat:
