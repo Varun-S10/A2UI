@@ -44,6 +44,7 @@ import * as v0_9 from '../index.js';
 import {ComponentNode, NodeProps, PLACEHOLDER_TYPE, isComponentNode} from './component-node.js';
 import {NodeResolver} from './node-resolver.js';
 import {ResolvedBinding, isWritable} from './resolved-binding.js';
+import {MAX_DYNAMIC_CHILD_LIST_SIZE} from '../rendering/generic-binder.js';
 
 const TextApi = {
   name: 'Text',
@@ -321,7 +322,7 @@ describe('NodeResolver conformance (port of test_node_graph.py)', () => {
     const surface = new SurfaceModel('surf-large', catalog);
     const resolver = new NodeResolver(surface, catalog);
 
-    const items = Array.from({length: 2000}, (_, i) => ({v: `row${i}`}));
+    const items = Array.from({length: 12_000}, (_, i) => ({v: `row${i}`}));
     surface.dataModel.set('/items', items);
     add(surface, 'root', 'Column', {
       children: {componentId: 'item-comp', path: '/items'},
@@ -331,9 +332,12 @@ describe('NodeResolver conformance (port of test_node_graph.py)', () => {
     const root = getValue(resolver.rootNode);
     assert.ok(root);
     const children = props(root).children as ComponentNode[];
-    assert.strictEqual(children.length, 1000);
+    assert.strictEqual(children.length, MAX_DYNAMIC_CHILD_LIST_SIZE);
     assert.strictEqual(children[0].dataPath, '/items/0');
-    assert.strictEqual(children[999].dataPath, '/items/999');
+    assert.strictEqual(
+      children[MAX_DYNAMIC_CHILD_LIST_SIZE - 1].dataPath,
+      `/items/${MAX_DYNAMIC_CHILD_LIST_SIZE - 1}`,
+    );
 
     resolver.dispose();
   });

@@ -266,7 +266,7 @@ describe('GenericBinder Checkable Trait', () => {
 
   it('should cap dynamic ChildList materialization to MAX_DYNAMIC_CHILD_LIST_SIZE (Issue #2387)', async () => {
     const {surface} = setupSurfaceAndMocks();
-    const largeList = Array.from({length: 2500}, (_, i) => ({title: `Item ${i}`}));
+    const largeList = Array.from({length: 12_000}, (_, i) => ({title: `Item ${i}`}));
     surface.dataModel.set('/largeItems', largeList);
 
     const structuralSchema = z.object({
@@ -286,16 +286,19 @@ describe('GenericBinder Checkable Trait', () => {
     binder.subscribe(() => {});
 
     assert.ok(Array.isArray(binder.snapshot.children));
-    assert.strictEqual(binder.snapshot.children.length, 1000);
+    assert.strictEqual(binder.snapshot.children.length, MAX_DYNAMIC_CHILD_LIST_SIZE);
     assert.strictEqual(binder.snapshot.children[0].basePath, '/largeItems/0');
-    assert.strictEqual(binder.snapshot.children[999].basePath, '/largeItems/999');
+    assert.strictEqual(
+      binder.snapshot.children[MAX_DYNAMIC_CHILD_LIST_SIZE - 1].basePath,
+      `/largeItems/${MAX_DYNAMIC_CHILD_LIST_SIZE - 1}`,
+    );
 
     // Update dynamically with even larger array
-    const evenLargerList = Array.from({length: 5000}, (_, i) => ({title: `Updated ${i}`}));
+    const evenLargerList = Array.from({length: 15_000}, (_, i) => ({title: `Updated ${i}`}));
     surface.dataModel.set('/largeItems', evenLargerList);
     await new Promise(resolve => setTimeout(resolve, 0));
 
-    assert.strictEqual(binder.snapshot.children.length, 1000);
+    assert.strictEqual(binder.snapshot.children.length, MAX_DYNAMIC_CHILD_LIST_SIZE);
   });
 
   it('should generate dynamic setters and update data model', () => {
@@ -457,7 +460,7 @@ describe('getSafeChildList helper function', () => {
   });
 
   it('slices array to MAX_DYNAMIC_CHILD_LIST_SIZE if length exceeds the limit', () => {
-    const largeList = Array.from({length: 1500}, (_, i) => i);
+    const largeList = Array.from({length: 15_000}, (_, i) => i);
     const safe = getSafeChildList(largeList);
     assert.strictEqual(safe.length, MAX_DYNAMIC_CHILD_LIST_SIZE);
     assert.strictEqual(safe[0], 0);

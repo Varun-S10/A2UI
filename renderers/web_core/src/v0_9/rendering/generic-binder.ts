@@ -204,7 +204,7 @@ export type ResolveA2uiProps<T> = (T extends object
  * The maximum number of children materialized by dynamic ChildList templates.
  * Prevents unbounded resource consumption (CWE-400) when bound to massive arrays.
  */
-export const MAX_DYNAMIC_CHILD_LIST_SIZE = 1000;
+export const MAX_DYNAMIC_CHILD_LIST_SIZE = 10_000;
 
 /**
  * Safely bounds array length for dynamic child lists to prevent unbounded memory allocation.
