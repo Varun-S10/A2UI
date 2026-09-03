@@ -13,6 +13,9 @@
 // limitations under the License.
 
 import A2UICore
+import A2UISwiftUI
+import BasicCatalog
+import BasicCatalogSwiftUI
 import Combine
 import Foundation
 
@@ -87,13 +90,16 @@ public final class GalleryViewModel: @unchecked Sendable, ObservableObject {
   @Published public private(set) var logEntries: [DiagnosticLogEntry] = []
   @Published public private(set) var dataModelString: String = "{}"
 
+  public let catalogs: [Catalog<ComponentImplementation>]
   private var processor: MessageProcessor
+  private let parser = MessageParser()
   private var surfaceSubscription: AnyCancellable?
   private let handler = GalleryActionHandler()
 
   public init() {
+    self.catalogs = BasicCatalogImplementation.allCatalogs
     self.processor = MessageProcessor(
-      catalogs: EmptyBasicCatalog.allCatalogs,
+      catalogs: BasicCatalog.allCatalogs,
       actionHandler: self.handler
     )
     self.handler.viewModel = self
@@ -115,7 +121,7 @@ public final class GalleryViewModel: @unchecked Sendable, ObservableObject {
     surfaceSubscription = nil
 
     self.processor = MessageProcessor(
-      catalogs: EmptyBasicCatalog.allCatalogs,
+      catalogs: BasicCatalog.allCatalogs,
       actionHandler: self.handler
     )
     self.currentStepIndex = 0
@@ -138,9 +144,19 @@ public final class GalleryViewModel: @unchecked Sendable, ObservableObject {
 
     let rawMessage = sample.rawMessages[currentStepIndex]
     do {
-      try processor.process(line: rawMessage)
+      let message = try parser.parse(jsonString: rawMessage)
+      processor.process(message: message)
     } catch {
-      // Errors are routed directly to GalleryActionHandler by MessageProcessor.
+      // Errors from processor are reported to GalleryActionHandler;
+      // unhandled parse errors are logged here.
+      if error is MessageParseError {
+        appendLogEntry(
+          DiagnosticLogEntry(
+            type: .error,
+            message: "JSON Parse Error: \(error.localizedDescription)"
+          )
+        )
+      }
     }
 
     currentStepIndex += 1
