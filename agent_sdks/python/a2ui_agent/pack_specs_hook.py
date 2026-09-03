@@ -146,24 +146,10 @@ class PackSpecsBuildHook(BuildHookInterface):
                 text=True,
             )
             if res.returncode != 0:
-                required_files = [
-                    "express_lexer.py",
-                    "express_parser.py",
-                    "express_visitor.py",
-                ]
-                if all(
-                    os.path.exists(os.path.join(generated_dir, f))
-                    for f in required_files
-                ):
-                    print(
-                        "WARNING: ANTLR parser generation failed (exit code"
-                        f" {res.returncode}), using existing generated files."
-                    )
-                else:
-                    raise RuntimeError(
-                        "ANTLR parser generation failed (exit code"
-                        f" {res.returncode}):\n{res.stderr}"
-                    )
+                raise RuntimeError(
+                    "ANTLR parser generation failed (exit code"
+                    f" {res.returncode}):\n{res.stderr}"
+                )
 
             # Rename files to clean snake_case:
             # ExpressLexer.py -> express_lexer.py
