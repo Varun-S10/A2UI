@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import 'dart:async';
+
 import 'package:a2ui_core/a2ui_core.dart';
 
 void main() async {
@@ -27,8 +28,11 @@ void main() async {
   // ---------------------------------------------------------------------------
   print('\n[Scenario 1] Default System Clock (Production Behavior)');
   print('---------------------------------------------------------');
-  final prodSurface = SurfaceModel<ComponentApi>('prod-surface', catalog: catalog);
-  
+  final prodSurface = SurfaceModel<ComponentApi>(
+    'prod-surface',
+    catalog: catalog,
+  );
+
   A2uiClientAction? prodAction;
   prodSurface.onAction.addListener((action) => prodAction = action);
 
@@ -36,10 +40,15 @@ void main() async {
     'event': {'name': 'user_clicked_submit'},
   }, 'btn_submit');
 
-  print('✓ Created SurfaceModel with default constructor (no clock parameter).');
-  print('✓ Action dispatched: "${prodAction?.name}" from component "${prodAction?.sourceComponentId}"');
-  print('✓ Generated Timestamp (Live Wall-Clock): ${prodAction?.timestamp.toIso8601String()}');
-
+  print(
+    '✓ Created SurfaceModel with default constructor (no clock parameter).',
+  );
+  print(
+    '✓ Action dispatched: "${prodAction?.name}" from component "${prodAction?.sourceComponentId}"',
+  );
+  print(
+    '✓ Generated Timestamp (Live Wall-Clock): ${prodAction?.timestamp.toIso8601String()}',
+  );
 
   // ---------------------------------------------------------------------------
   // SCENARIO 2: Injected Deterministic Fake Clock (Testing Mode)
@@ -62,21 +71,26 @@ void main() async {
     'event': {'name': 'open_modal'},
   }, 'btn_modal');
 
-  print('✓ Created SurfaceModel with injected FakeClock starting at: $fixedStartTime');
+  print(
+    '✓ Created SurfaceModel with injected FakeClock starting at: $fixedStartTime',
+  );
   print('✓ Action dispatched: "${testAction?.name}"');
-  print('✓ Generated Timestamp (Exact Injected Time): ${testAction?.timestamp.toIso8601String()}');
+  print(
+    '✓ Generated Timestamp (Exact Injected Time): ${testAction?.timestamp.toIso8601String()}',
+  );
   assert(
     testAction?.timestamp == fixedStartTime,
     'Timestamp must match fixedStartTime exactly!',
   );
-
 
   // ---------------------------------------------------------------------------
   // SCENARIO 3: Advancing Fake Clock without sleeping
   // ---------------------------------------------------------------------------
   print('\n[Scenario 3] Advancing Fake Clock (Instant Virtual Time Travel)');
   print('---------------------------------------------------------');
-  print('-> Advancing clock by 2 hours and 30 minutes (0 milliseconds of real sleep)...');
+  print(
+    '-> Advancing clock by 2 hours and 30 minutes (0 milliseconds of real sleep)...',
+  );
   fakeClock.advance(const Duration(hours: 2, minutes: 30));
 
   await testSurface.dispatchAction({
@@ -85,12 +99,13 @@ void main() async {
 
   final expectedAdvancedTime = DateTime.utc(2026, 1, 1, 12, 30, 0);
   print('✓ Action dispatched: "${testAction?.name}"');
-  print('✓ Generated Timestamp (Advanced Time): ${testAction?.timestamp.toIso8601String()}');
+  print(
+    '✓ Generated Timestamp (Advanced Time): ${testAction?.timestamp.toIso8601String()}',
+  );
   assert(
     testAction?.timestamp == expectedAdvancedTime,
     'Timestamp must match expectedAdvancedTime exactly!',
   );
-
 
   // ---------------------------------------------------------------------------
   // SCENARIO 4: Clock Propagation to Dynamic Surfaces (MessageProcessor)
@@ -118,9 +133,10 @@ void main() async {
 
   print('✓ Processed CreateSurfaceMessage for surface "dynamic-cart".');
   print('✓ Dynamic surface inherited processor\'s injected clock.');
-  print('✓ Action received by group listener: "${groupAction?.name}" on surface "${groupAction?.surfaceId}"');
+  print(
+    '✓ Action received by group listener: "${groupAction?.name}" on surface "${groupAction?.surfaceId}"',
+  );
   print('✓ Generated Timestamp: ${groupAction?.timestamp.toIso8601String()}');
-
 
   // ---------------------------------------------------------------------------
   // SCENARIO 5: Timeout Cancellation with Mock Timer
@@ -138,11 +154,14 @@ void main() async {
 
   print('✓ Created CancellationSignal with 10s timeout.');
   print('✓ Before timer trigger -> signal.isCancelled: ${signal.isCancelled}');
-  
+
   // Trigger mock timer callback
   timerCallback!();
   print('✓ After timer trigger  -> signal.isCancelled: ${signal.isCancelled}');
-  assert(signal.isCancelled == true, 'Signal must be cancelled after timer triggers!');
+  assert(
+    signal.isCancelled == true,
+    'Signal must be cancelled after timer triggers!',
+  );
 
   print('\n' + '=' * 75);
   print('ALL MANUAL TEST SCENARIOS EXECUTED AND PASSED PERFECTLY!');

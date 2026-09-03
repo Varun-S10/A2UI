@@ -34,11 +34,14 @@ void main() {
       );
     });
 
-    test('FakeClock default constructor initializes to 2026-01-01T00:00:00Z', () {
-      final clock = FakeClock();
-      expect(clock.now, equals(DateTime.utc(2026, 1, 1, 0, 0, 0)));
-      expect(clock(), equals(DateTime.utc(2026, 1, 1, 0, 0, 0)));
-    });
+    test(
+      'FakeClock default constructor initializes to 2026-01-01T00:00:00Z',
+      () {
+        final clock = FakeClock();
+        expect(clock.now, equals(DateTime.utc(2026, 1, 1, 0, 0, 0)));
+        expect(clock(), equals(DateTime.utc(2026, 1, 1, 0, 0, 0)));
+      },
+    );
 
     test('FakeClock accepts custom initial time', () {
       final customTime = DateTime.utc(2026, 8, 14, 13, 15, 30);
