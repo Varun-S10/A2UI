@@ -456,7 +456,7 @@ describe('DataModel', () => {
     assert.strictEqual(model.get('/items/01'), undefined);
   });
 
-  // --- Security Tests: Unbounded Array Index Protection (Issue #2386 / CWE-400) ---
+  // Test unbounded array index protection (see https://github.com/a2ui-project/a2ui/issues/2386)
 
   it('rejects excessively large array indices to prevent OOM and thread hangs (Issue #2386)', () => {
     // Leaf index on existing array

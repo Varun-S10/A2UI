@@ -42,7 +42,7 @@ function isNumeric(value: string): boolean {
 
 /**
  * The maximum array index that auto-vivification and array mutations will expand to.
- * Prevents OOM and thread hangs from excessively large indices (CWE-400 / CWE-770).
+ * Prevents OOM and thread hangs from excessively large indices.
  */
 export const MAX_ARRAY_INDEX = 10000;
 
