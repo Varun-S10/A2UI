@@ -117,4 +117,3 @@ def test_parses_non_ascii_identifiers_and_paths(parser):
         {"path": "señor"},
         " qué tal",
     ]
-

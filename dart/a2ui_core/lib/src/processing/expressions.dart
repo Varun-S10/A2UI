@@ -240,7 +240,7 @@ class ExpressionParser {
 
   static final RegExp _unicodeAlnum = RegExp(r'\p{L}|\p{N}', unicode: true);
 
-  bool _isAlnum(String c) {
+  static bool _isAlnum(String c) {
     if (c.isEmpty) return false;
     final int u = c.codeUnitAt(0);
     if ((u >= 0x30 && u <= 0x39) || // 0-9
@@ -314,21 +314,7 @@ class _Scanner {
     return input.substring(start, end);
   }
 
-  static bool _isWordChar(String c) {
-    if (c.isEmpty) return false;
-    final int u = c.codeUnitAt(0);
-    if ((u >= 0x30 && u <= 0x39) || // 0-9
-        (u >= 0x41 && u <= 0x5A) || // A-Z
-        (u >= 0x61 && u <= 0x7A) || // a-z
-        u == 0x5F) {
-      // _
-      return true;
-    }
-    if (u < 128) {
-      return false;
-    }
-    return ExpressionParser._unicodeAlnum.hasMatch(c);
-  }
+  static bool _isWordChar(String c) => c == '_' || ExpressionParser._isAlnum(c);
 
   static bool _isWhitespace(int u) {
     return u == 0x20 || u == 0x09 || u == 0x0A || u == 0x0D; // space/tab/LF/CR

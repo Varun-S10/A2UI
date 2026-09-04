@@ -264,12 +264,7 @@ class ExpressionParser:
         return int(num_str)
 
     def is_alnum(self, c: str) -> bool:
-        return (
-            ("a" <= c <= "z")
-            or ("A" <= c <= "Z")
-            or ("0" <= c <= "9")
-            or c.isalnum()
-        )
+        return c.isalnum()
 
     def is_digit(self, c: str) -> bool:
         return "0" <= c <= "9"
