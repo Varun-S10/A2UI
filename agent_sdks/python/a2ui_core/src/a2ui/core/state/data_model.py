@@ -13,15 +13,15 @@
 # limitations under the License.
 
 import copy
-import re
 from typing import Any, Callable, Dict, List, Optional, Set
 from ..common.events import Subscription
+from ..common.json_pointer import (
+    FORBIDDEN_PATH_SEGMENTS,
+    NUMERIC_PATTERN,
+    split_json_pointer,
+)
 
-# Regex to check if path segment is numeric (representing array index)
-NUMERIC_PATTERN = re.compile(r"^(?:0|[1-9][0-9]*)$")
-
-# Keys forbidden in path resolution to prevent prototype pollution vulnerabilities.
-FORBIDDEN_KEYS = frozenset({"__proto__", "constructor", "prototype"})
+FORBIDDEN_KEYS = FORBIDDEN_PATH_SEGMENTS
 
 
 class DataModel:
@@ -38,15 +38,7 @@ class DataModel:
         Raises:
             ValueError: If path contains forbidden segments ('__proto__', 'constructor', 'prototype').
         """
-        if not path or path == "/":
-            return []
-        if not path.startswith("/"):
-            # Support relative scope path resolution
-            raw_tokens = path.split("/")
-        else:
-            raw_tokens = path[1:].split("/")
-
-        tokens = [t.replace("~1", "/").replace("~0", "~") for t in raw_tokens]
+        tokens = split_json_pointer(path)
         for token in tokens:
             if token in FORBIDDEN_KEYS:
                 raise ValueError(f"Forbidden path segment '{token}' in path '{path}'.")

@@ -341,3 +341,27 @@ def test_data_model_allows_valid_similar_path_segments():
 
     assert dm.get("/user/prototype_name") == "test_proto"
     assert dm.get("/constructor_args/value") == 123
+
+
+def test_data_model_escaped_pointer_tokens():
+    dm = DataModel()
+    # RFC 6901: ~0 represents '~' and ~1 represents '/'
+    dm.set("/a~1b", "slash_key")
+    dm.set("/m~0n", "tilde_key")
+
+    assert dm.get("/a~1b") == "slash_key"
+    assert dm.get("/m~0n") == "tilde_key"
+    assert dm.get("/") == {"a/b": "slash_key", "m~n": "tilde_key"}
+
+
+def test_centralized_json_pointer_helpers():
+    from a2ui.core.common.json_pointer import (
+        split_json_pointer,
+        unescape_json_pointer,
+    )
+
+    assert unescape_json_pointer("a~1b~0c~01d") == "a/b~c~1d"
+    assert split_json_pointer("") == []
+    assert split_json_pointer("/") == []
+    assert split_json_pointer("/users/0/a~1b") == ["users", "0", "a/b"]
+    assert split_json_pointer("relative/m~0n") == ["relative", "m~n"]
