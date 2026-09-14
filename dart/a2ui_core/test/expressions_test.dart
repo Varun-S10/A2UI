@@ -90,6 +90,29 @@ void main() {
         {'path': 'señor'},
         ' qué tal',
       ]);
+      // UAX #31 combining marks (decomposed Unicode)
+      expect(parser.parse(r'${señor}'), [
+        {'path': 'señor'},
+      ]);
+      expect(parser.parse(r'${café/precio}'), [
+        {'path': 'café/precio'},
+      ]);
+      // Keywords followed by identifier continuation characters
+      expect(parser.parse(r'${true_val}'), [
+        {'path': 'true_val'},
+      ]);
+      expect(parser.parse(r'${trueñ}'), [
+        {'path': 'trueñ'},
+      ]);
+      expect(parser.parse(r'${true1}'), [
+        {'path': 'true1'},
+      ]);
+      // Identifiers in function calls
+      expect(parser.parseExpression('add(número: 10, 日本: 20)'), {
+        'call': 'add',
+        'args': {'número': 10, '日本': 20},
+        'returnType': 'any',
+      });
     });
 
     group('recursion depth', () {

@@ -167,7 +167,7 @@ class ExpressionParser {
     final int start = scanner.pos;
     while (!scanner.isAtEnd) {
       final String c = scanner.peek();
-      if (_isAlnum(c) || c == '/' || c == '.' || c == '_' || c == '-') {
+      if (_isIdContinue(c) || c == '/' || c == '.' || c == '-') {
         scanner.advance();
       } else {
         break;
@@ -212,8 +212,7 @@ class ExpressionParser {
 
   String _scanIdentifier(_Scanner scanner) {
     final int start = scanner.pos;
-    while (!scanner.isAtEnd &&
-        (_isAlnum(scanner.peek()) || scanner.peek() == '_')) {
+    while (!scanner.isAtEnd && _isIdContinue(scanner.peek())) {
       scanner.advance();
     }
     return scanner.input.substring(start, scanner.pos);
@@ -259,22 +258,25 @@ class ExpressionParser {
     return num.parse(text);
   }
 
-  static final RegExp _unicodeAlnum = RegExp(r'\p{L}|\p{N}', unicode: true);
+  static final RegExp _xidContinue = RegExp(r'\p{XID_Continue}', unicode: true);
 
-  static bool _isAlnum(String c) {
+  static bool _isIdContinue(String c) {
     if (c.isEmpty) return false;
     final int u = c.codeUnitAt(0);
     if ((u >= 0x30 && u <= 0x39) || // 0-9
         (u >= 0x41 && u <= 0x5A) || // A-Z
-        (u >= 0x61 && u <= 0x7A)) {
-      // a-z
+        (u >= 0x61 && u <= 0x7A) || // a-z
+        u == 0x5F) {
+      // _
       return true;
     }
     if (u < 128) {
       return false;
     }
-    return _unicodeAlnum.hasMatch(c);
+    return _xidContinue.hasMatch(c);
   }
+
+  static bool _isAlnum(String c) => _isIdContinue(c);
 
   bool _isDigit(String c) {
     if (c.isEmpty) return false;
@@ -335,7 +337,7 @@ class _Scanner {
     return input.substring(start, end);
   }
 
-  static bool _isWordChar(String c) => c == '_' || ExpressionParser._isAlnum(c);
+  static bool _isWordChar(String c) => ExpressionParser._isIdContinue(c);
 
   static bool _isWhitespace(int u) {
     return u == 0x20 || u == 0x09 || u == 0x0A || u == 0x0D; // space/tab/LF/CR

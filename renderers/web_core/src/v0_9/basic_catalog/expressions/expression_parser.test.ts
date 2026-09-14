@@ -177,5 +177,18 @@ describe('ExpressionParser', () => {
       {path: 'señor'},
       ' qué tal',
     ]);
+    // UAX #31 combining marks (decomposed Unicode)
+    assert.deepStrictEqual(parser.parse('${sen\u0303or}'), [{path: 'sen\u0303or'}]);
+    assert.deepStrictEqual(parser.parse('${cafe\u0301/precio}'), [{path: 'cafe\u0301/precio'}]);
+    // Keywords followed by identifier continuation characters
+    assert.deepStrictEqual(parser.parse('${true_val}'), [{path: 'true_val'}]);
+    assert.deepStrictEqual(parser.parse('${trueñ}'), [{path: 'trueñ'}]);
+    assert.deepStrictEqual(parser.parse('${true1}'), [{path: 'true1'}]);
+    // Identifiers in function calls
+    assert.deepStrictEqual(parser.parseExpression('add(número: 10, 日本: 20)'), {
+      call: 'add',
+      args: {número: 10, 日本: 20},
+      returnType: 'any',
+    });
   });
 });

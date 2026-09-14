@@ -15,6 +15,17 @@
 from typing import Any, Dict, List, Union
 
 
+def _is_id_continue(c: str) -> bool:
+    """Returns True if character belongs to Unicode UAX #31 XID_Continue."""
+    if not c or len(c) != 1 or c == "\0":
+        return False
+    if ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or c == "_":
+        return True
+    if ord(c) < 128:
+        return False
+    return ("a" + c).isidentifier()
+
+
 class Scanner:
 
     def __init__(self, input_str: str) -> None:
@@ -49,7 +60,7 @@ class Scanner:
     def matches_keyword(self, keyword: str) -> bool:
         if self.input.startswith(keyword, self.pos):
             next_char = self.peek(len(keyword))
-            if not (next_char.isalnum() or next_char == "_"):
+            if not _is_id_continue(next_char):
                 self.advance(len(keyword))
                 return True
         return False
@@ -184,7 +195,7 @@ class ExpressionParser:
         start = scanner.pos
         while not scanner.is_at_end():
             c = scanner.peek()
-            if self.is_alnum(c) or c in ("/", ".", "_", "-"):
+            if _is_id_continue(c) or c in ("/", ".", "-"):
                 scanner.advance()
             else:
                 break
@@ -222,9 +233,7 @@ class ExpressionParser:
 
     def scan_identifier(self, scanner: Scanner) -> str:
         start = scanner.pos
-        while not scanner.is_at_end() and (
-            self.is_alnum(scanner.peek()) or scanner.peek() == "_"
-        ):
+        while not scanner.is_at_end() and _is_id_continue(scanner.peek()):
             scanner.advance()
         return scanner.input[start : scanner.pos]
 
@@ -263,7 +272,7 @@ class ExpressionParser:
         return int(num_str)
 
     def is_alnum(self, c: str) -> bool:
-        return c.isalnum()
+        return _is_id_continue(c)
 
     def is_digit(self, c: str) -> bool:
         return "0" <= c <= "9"
