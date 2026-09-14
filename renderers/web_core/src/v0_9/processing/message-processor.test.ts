@@ -259,7 +259,7 @@ describe('MessageProcessor', () => {
     const themedCatalog = new Catalog('themed-cat', [], [], BasicCatalogThemeSchema);
     const proc = new MessageProcessor([themedCatalog]);
 
-    // Valid themes: 6-char hex, 3-char hex, 8-char hex (with alpha)
+    // Valid themes: 6-char hex, 3-char hex, 8-char hex (with alpha), named color, functional colors
     proc.processMessages([
       {
         version: 'v0.9',
@@ -293,6 +293,36 @@ describe('MessageProcessor', () => {
           },
         },
       },
+      {
+        version: 'v0.9',
+        createSurface: {
+          surfaceId: 'valid-surface-named',
+          catalogId: 'themed-cat',
+          theme: {
+            primaryColor: 'red',
+          },
+        },
+      },
+      {
+        version: 'v0.9',
+        createSurface: {
+          surfaceId: 'valid-surface-rgb',
+          catalogId: 'themed-cat',
+          theme: {
+            primaryColor: 'rgb(255, 0, 0)',
+          },
+        },
+      },
+      {
+        version: 'v0.9',
+        createSurface: {
+          surfaceId: 'valid-surface-hsl',
+          catalogId: 'themed-cat',
+          theme: {
+            primaryColor: 'hsl(120, 100%, 50%)',
+          },
+        },
+      },
     ]);
     const surface6 = proc.model.getSurface('valid-surface-6char');
     assert.ok(surface6);
@@ -306,6 +336,18 @@ describe('MessageProcessor', () => {
     const surface8 = proc.model.getSurface('valid-surface-8char');
     assert.ok(surface8);
     assert.strictEqual(surface8.theme?.primaryColor, '#00BFFF80');
+
+    const surfaceNamed = proc.model.getSurface('valid-surface-named');
+    assert.ok(surfaceNamed);
+    assert.strictEqual(surfaceNamed.theme?.primaryColor, 'red');
+
+    const surfaceRgb = proc.model.getSurface('valid-surface-rgb');
+    assert.ok(surfaceRgb);
+    assert.strictEqual(surfaceRgb.theme?.primaryColor, 'rgb(255, 0, 0)');
+
+    const surfaceHsl = proc.model.getSurface('valid-surface-hsl');
+    assert.ok(surfaceHsl);
+    assert.strictEqual(surfaceHsl.theme?.primaryColor, 'hsl(120, 100%, 50%)');
 
     // Invalid theme: hex color format violation / CSS injection attempt
     assert.throws(
@@ -329,8 +371,15 @@ describe('MessageProcessor', () => {
     );
     assert.strictEqual(proc.model.getSurface('invalid-surface-1'), undefined);
 
-    // Invalid theme: invalid hex lengths (e.g. 2, 5, 7 chars)
-    for (const invalidColor of ['#12', '#12345', '#1234567', '#gggggg', 'red']) {
+    // Invalid theme: invalid hex lengths or invalid color strings
+    for (const invalidColor of [
+      '#12',
+      '#12345',
+      '#1234567',
+      '#gggggg',
+      'not-a-color',
+      'red; url(x)',
+    ]) {
       assert.throws(
         () => {
           proc.processMessages([
