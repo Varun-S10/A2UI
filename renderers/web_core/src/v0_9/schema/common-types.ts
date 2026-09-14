@@ -25,7 +25,7 @@ export const DataBindingSchema = z
   );
 export type DataBindingType = z.infer<typeof DataBindingSchema>;
 
-export const MAX_FUNCTION_CALL_ARGS = 255;
+export const MAX_FUNCTION_CALL_ARGS = 1_000;
 
 export const FunctionCallSchema = z
   .object({

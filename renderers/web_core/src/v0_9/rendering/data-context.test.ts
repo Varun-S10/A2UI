@@ -19,7 +19,7 @@ import {describe, it, beforeEach} from 'node:test';
 import {signal, computed, peekValue, getValue, setValue} from '../reactivity/signals.js';
 import {z} from 'zod';
 import {DataModel} from '../state/data-model.js';
-import {DataContext, getKnownSchemaKeys, filterFunctionArgs} from './data-context.js';
+import {DataContext, getKnownSchemaKeys, validateFunctionArgs} from './data-context.js';
 import {Catalog} from '../catalog/types.js';
 import {FunctionCallSchema, MAX_FUNCTION_CALL_ARGS} from '../schema/common-types.js';
 import {A2uiExpressionError} from '../errors.js';
@@ -574,7 +574,7 @@ describe('DataContext', () => {
       assert.strictEqual(getKnownSchemaKeys(intersectionWithPassthrough), null);
     });
 
-    it('filterFunctionArgs strips unknown keys when schema is available', () => {
+    it('validateFunctionArgs allows valid keys when schema is available', () => {
       const catalog = new Catalog(
         'test-cat',
         [],
@@ -588,18 +588,81 @@ describe('DataContext', () => {
         ],
       );
 
-      const raw = {
+      const validArgs = {
         name: 'Alice',
         age: 30,
-        extra1: 'junk',
-        extra2: {path: '/secret'},
       };
 
-      const filtered = filterFunctionArgs('testFunc', raw, catalog);
-      assert.deepStrictEqual(filtered, {name: 'Alice', age: 30});
+      assert.doesNotThrow(() => {
+        validateFunctionArgs('testFunc', validArgs, catalog);
+      });
     });
 
-    it('resolveSignal does not subscribe to unknown arguments', () => {
+    it('validateFunctionArgs throws error on unknown arguments', () => {
+      const catalog = new Catalog(
+        'test-cat',
+        [],
+        [
+          {
+            name: 'testFunc',
+            returnType: 'string',
+            schema: z.object({name: z.string(), age: z.number().optional()}),
+            execute: (args: any) => `Hello ${args.name}`,
+          },
+        ],
+      );
+
+      const invalidArgs = {
+        name: 'Alice',
+        extra: 'junk',
+      };
+
+      assert.throws(
+        () => validateFunctionArgs('testFunc', invalidArgs, catalog),
+        (err: any) => {
+          assert.strictEqual(err instanceof A2uiExpressionError, true);
+          assert.match(err.message, /Unknown argument 'extra'/);
+          return true;
+        },
+      );
+    });
+
+    it('validateFunctionArgs throws error when exceeding maximum argument limits', () => {
+      const catalog = new Catalog(
+        'test-cat',
+        [],
+        [
+          {
+            name: 'testFunc',
+            returnType: 'string',
+            schema: z.object({name: z.string()}),
+            execute: (args: any) => `Hello ${args.name}`,
+          },
+        ],
+      );
+
+      const tooManyArgs: Record<string, any> = {name: 'Alice', extra1: 1, extra2: 2};
+      assert.throws(
+        () => validateFunctionArgs('testFunc', tooManyArgs, catalog),
+        (err: any) => {
+          assert.strictEqual(err instanceof A2uiExpressionError, true);
+          return true;
+        },
+      );
+
+      const excessiveArgs: Record<string, any> = {};
+      for (let i = 0; i <= MAX_FUNCTION_CALL_ARGS + 5; i++) excessiveArgs[`k${i}`] = i;
+      assert.throws(
+        () => validateFunctionArgs('testFunc', excessiveArgs, catalog),
+        (err: any) => {
+          assert.strictEqual(err instanceof A2uiExpressionError, true);
+          assert.match(err.message, /exceeds maximum allowed arguments count/);
+          return true;
+        },
+      );
+    });
+
+    it('resolveSignal dispatches error and prevents signal creation on unknown arguments', () => {
       const customModel = new DataModel({
         validVal: 'Alice',
         junkVal: 'Secret',
@@ -618,43 +681,73 @@ describe('DataContext', () => {
         ],
       );
 
+      let dispatchedError: any = null;
       const mockSurface = {
         dataModel: customModel,
         catalog,
-        dispatchError: () => {},
+        dispatchError: (err: any) => {
+          dispatchedError = err;
+        },
       } as any;
       const ctx = new DataContext(mockSurface, '/');
 
-      let calledCount = 0;
-      const sub = ctx.subscribeDynamicValue(
-        {
-          call: 'greet',
-          args: {
-            name: {path: '/validVal'},
-            junk: {path: '/junkVal'},
+      const sig = ctx.resolveSignal({
+        call: 'greet',
+        args: {
+          name: {path: '/validVal'},
+          junk: {path: '/junkVal'},
+        },
+        returnType: 'any',
+      });
+
+      assert.strictEqual(peekValue(sig), undefined);
+      assert.ok(dispatchedError);
+      assert.strictEqual(dispatchedError.code, 'EXPRESSION_ERROR');
+      assert.match(dispatchedError.message, /Unknown argument 'junk'/);
+    });
+
+    it('resolveDynamicValue dispatches error on unknown arguments', () => {
+      const catalog = new Catalog(
+        'test-cat',
+        [],
+        [
+          {
+            name: 'greet',
+            returnType: 'string',
+            schema: z.object({name: z.string()}),
+            execute: (args: any) => `Hello ${args.name}`,
           },
-          returnType: 'any',
-        },
-        () => {
-          calledCount++;
-        },
+        ],
       );
 
-      assert.strictEqual(sub.value, 'Hello Alice');
+      let dispatchedError: any = null;
+      const mockSurface = {
+        dataModel: new DataModel({}),
+        catalog,
+        dispatchError: (err: any) => {
+          dispatchedError = err;
+        },
+      } as any;
+      const ctx = new DataContext(mockSurface, '/');
 
-      // Modifying /junkVal should NOT trigger re-computation because 'junk' was stripped before resolveSignal
-      customModel.set('/junkVal', 'Changed');
-      assert.strictEqual(calledCount, 0, 'Re-evaluated for stripped argument');
+      const res = ctx.resolveDynamicValue({
+        call: 'greet',
+        args: {
+          name: 'Alice',
+          junk: 'extra',
+        },
+        returnType: 'any',
+      });
 
-      // Modifying /validVal SHOULD trigger re-computation
-      customModel.set('/validVal', 'Bob');
-      assert.strictEqual(calledCount, 1, 'Re-evaluation did not trigger for valid argument');
-      assert.strictEqual(sub.value, 'Hello Bob');
-
-      sub.unsubscribe();
+      assert.strictEqual(res, undefined);
+      assert.ok(dispatchedError);
+      assert.strictEqual(dispatchedError.code, 'EXPRESSION_ERROR');
+      assert.match(dispatchedError.message, /Unknown argument 'junk'/);
     });
 
     it('FunctionCallSchema enforces MAX_FUNCTION_CALL_ARGS limit', () => {
+      assert.strictEqual(MAX_FUNCTION_CALL_ARGS, 1000);
+
       const validArgs: Record<string, any> = {};
       for (let i = 0; i < 50; i++) validArgs[`k${i}`] = i;
 

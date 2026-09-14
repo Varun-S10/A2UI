@@ -27,7 +27,13 @@ import {
 } from '../reactivity/signals.js';
 import {z} from 'zod';
 import {DataModel, DataSubscription} from '../state/data-model.js';
-import type {DynamicValue, DataBinding, FunctionCall, Action} from '../schema/common-types.js';
+import {
+  type DynamicValue,
+  type DataBinding,
+  type FunctionCall,
+  type Action,
+  MAX_FUNCTION_CALL_ARGS,
+} from '../schema/common-types.js';
 import {A2uiExpressionError} from '../errors.js';
 
 import {FunctionInvoker} from '../catalog/function_invoker.js';
@@ -115,35 +121,55 @@ export function getKnownSchemaKeys(schema: z.ZodTypeAny): Set<string> | null {
 }
 
 /**
- * Strips unknown arguments from a function call's args dictionary before creating reactive
- * nodes (signals, computed values, effects) in DataContext.
+ * Validates a function call's arguments against the catalog function schema and global limits.
  *
- * This prevents uncontrolled resource consumption (CWE-400) where malicious or bloated
- * payloads attach thousands of unused arguments to a function call.
+ * Functions have a strict contract: supplying unknown or excessive arguments breaks that contract
+ * and causes an A2uiExpressionError rather than silently stripping them. Validating arguments before
+ * creating reactive nodes also prevents uncontrolled resource consumption.
  */
-export function filterFunctionArgs(
+export function validateFunctionArgs(
   functionName: string,
   rawArgs: Record<string, any> | undefined | null,
   catalog?: CatalogInterface<any, any> | any,
-): Record<string, any> {
+): void {
   if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
-    return {};
+    return;
   }
+
+  const suppliedKeys = Object.keys(rawArgs);
+  if (suppliedKeys.length > MAX_FUNCTION_CALL_ARGS) {
+    throw new A2uiExpressionError(
+      `Function call '${functionName}' exceeds maximum allowed arguments count (${MAX_FUNCTION_CALL_ARGS})`,
+      functionName,
+    );
+  }
+
   const fn = catalog?.functions?.get?.(functionName);
   if (!fn?.schema) {
-    return rawArgs;
+    return;
   }
+
   const knownKeys = getKnownSchemaKeys(fn.schema);
   if (!knownKeys) {
-    return rawArgs;
+    // Schema allows arbitrary keys (e.g. passthrough)
+    return;
   }
-  const filtered: Record<string, any> = {};
-  for (const [key, value] of Object.entries(rawArgs)) {
-    if (knownKeys.has(key)) {
-      filtered[key] = value;
+
+  for (const key of suppliedKeys) {
+    if (!knownKeys.has(key)) {
+      throw new A2uiExpressionError(
+        `Unknown argument '${key}' passed to function '${functionName}'`,
+        functionName,
+      );
     }
   }
-  return filtered;
+
+  if (suppliedKeys.length > knownKeys.size) {
+    throw new A2uiExpressionError(
+      `Too many arguments for function '${functionName}': expected at most ${knownKeys.size}, received ${suppliedKeys.length}`,
+      functionName,
+    );
+  }
 }
 
 /**
@@ -237,10 +263,15 @@ export class DataContext {
     // 3. Function Call: { call: "...", args: ... }
     if ('call' in value) {
       const call = value as FunctionCall;
-      const filteredArgs = filterFunctionArgs(call.call, call.args, this.surface?.catalog);
+      try {
+        validateFunctionArgs(call.call, call.args, this.surface?.catalog);
+      } catch (e: any) {
+        this.dispatchExpressionError(e, call.call);
+        return undefined as any;
+      }
       const args: Record<string, any> = {};
 
-      for (const [key, argVal] of Object.entries(filteredArgs)) {
+      for (const [key, argVal] of Object.entries(call.args || {})) {
         args[key] = this.resolveDynamicValue(argVal);
       }
 
@@ -340,10 +371,15 @@ export class DataContext {
     // 3. Function Call
     if ('call' in value) {
       const call = value as FunctionCall;
-      const filteredArgs = filterFunctionArgs(call.call, call.args, this.surface?.catalog);
+      try {
+        validateFunctionArgs(call.call, call.args, this.surface?.catalog);
+      } catch (e: any) {
+        this.dispatchExpressionError(e, call.call);
+        return signal(undefined as unknown as V);
+      }
       const argSignals: Record<string, Signal<any>> = {};
 
-      for (const [key, argVal] of Object.entries(filteredArgs)) {
+      for (const [key, argVal] of Object.entries(call.args || {})) {
         argSignals[key] = this.resolveSignal(argVal);
       }
 
