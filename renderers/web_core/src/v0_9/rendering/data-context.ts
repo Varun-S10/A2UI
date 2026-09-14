@@ -35,9 +35,9 @@ import {SurfaceModel} from '../state/surface-model.js';
 
 /**
  * The maximum allowed recursion depth for evaluating nested dynamic values or function calls.
- * Prevents call stack exhaustion (CWE-674) on deeply nested expression payloads.
+ * Prevents call stack exhaustion on deeply nested expression payloads.
  */
-export const MAX_DYNAMIC_VALUE_DEPTH = 20;
+export const MAX_DYNAMIC_VALUE_DEPTH = 1_000;
 
 /**
  * A contextual view of the main DataModel, serving as the unified interface for resolving

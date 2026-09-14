@@ -543,7 +543,7 @@ describe('DataContext', () => {
     });
 
     it('guards against excessive recursion in resolveDynamicValue (Issue #2388)', () => {
-      assert.strictEqual(MAX_DYNAMIC_VALUE_DEPTH, 20);
+      assert.strictEqual(MAX_DYNAMIC_VALUE_DEPTH, 1000);
       let nested: any = {path: '/val'};
       for (let i = 0; i <= MAX_DYNAMIC_VALUE_DEPTH + 10; i++) {
         nested = {call: 'wrap', args: {v: nested}};
@@ -568,7 +568,7 @@ describe('DataContext', () => {
 
     it('guards against excessive recursion in resolveSignal / subscribeDynamicValue without call stack overflow (Issue #2388)', () => {
       let nested: any = {path: '/val'};
-      for (let i = 0; i < 1000; i++) {
+      for (let i = 0; i <= MAX_DYNAMIC_VALUE_DEPTH + 10; i++) {
         nested = {call: 'wrap', args: {v: nested}};
       }
 
