@@ -276,8 +276,6 @@ class ExpressionParser {
     return _xidContinue.hasMatch(c);
   }
 
-  static bool _isAlnum(String c) => _isIdContinue(c);
-
   bool _isDigit(String c) {
     if (c.isEmpty) return false;
     final int u = c.codeUnitAt(0);
