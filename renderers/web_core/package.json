@@ -1,6 +1,6 @@
 {
   "name": "@a2ui/web_core",
-  "version": "0.10.7",
+  "version": "0.11.0",
   "description": "A2UI Core Library",
   "homepage": "https://a2ui.org/",
   "repository": {
@@ -106,6 +106,7 @@
       "files": [
         "src/**/*.ts",
         "src/**/*.json",
+        "tests/**/*.ts",
         "tsconfig.json"
       ],
       "output": [
@@ -128,6 +129,7 @@
       "files": [
         "src/**/*.ts",
         "src/**/*.json",
+        "tests/**/*.ts",
         "scripts/**/*.js",
         "package.json",
         "tsconfig.json"
@@ -138,6 +140,7 @@
       "files": [
         "src/**/*.ts",
         "src/**/*.json",
+        "tests/**/*.ts",
         "scripts/**/*.js",
         "package.json",
         "tsconfig.json"
@@ -148,16 +151,19 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@angular/core": "^21.2.5",
+    "@types/js-yaml": "^4.0.9",
     "@types/jsdom": "^28.0.3",
     "@types/node": "^25.9.3",
     "c8": "^11.0.0",
     "eslint": "^10.4.1",
     "google-artifactregistry-auth": "^3.5.0",
     "gts": "^7.0.0",
+    "js-yaml": "^4.1.0",
     "jsdom": "^29.1.1",
     "rxjs": "^7.8.2",
     "typescript": "5.9.3",
-    "wireit": "^0.15.0-pre.2"
+    "wireit": "^0.15.0-pre.2",
+    "yaml": "^2.8.1"
   },
   "dependencies": {
     "@lit/context": "^1.1.6",
