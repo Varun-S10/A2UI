@@ -376,7 +376,7 @@ export class A2uiMessageProcessor implements MessageProcessor {
         return null;
       }
     }
-    return current ?? null;
+    return current;
   }
 
   private getOrCreateSurface(surfaceId: string): Surface {
