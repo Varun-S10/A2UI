@@ -110,7 +110,8 @@ void main() {
       expect(parser.parse(r'${true𐐷}'), [
         {'path': 'true𐐷'},
       ]);
-      // Supplementary plane Unicode characters (U+10437 Deseret Small Letter Yee)
+      // Supplementary plane Unicode characters (U+10437 Deseret Small Letter
+      // Yee)
       expect(parser.parse(r'${𐐷}'), [
         {'path': '𐐷'},
       ]);
