@@ -124,6 +124,10 @@ def test_parses_non_ascii_identifiers_and_paths(parser):
     assert parser.parse("${true_val}") == [{"path": "true_val"}]
     assert parser.parse("${trueñ}") == [{"path": "trueñ"}]
     assert parser.parse("${true1}") == [{"path": "true1"}]
+    assert parser.parse("${true𐐷}") == [{"path": "true𐐷"}]
+    # Supplementary plane Unicode characters (U+10437 Deseret Small Letter Yee)
+    assert parser.parse("${𐐷}") == [{"path": "𐐷"}]
+    assert parser.parse("${a𐐷b}") == [{"path": "a𐐷b"}]
     # Identifiers in function calls
     assert parser.parse_expression("add(número: 10, 日本: 20)") == {
         "call": "add",

@@ -204,7 +204,7 @@ export class ExpressionParser {
     const start = scanner.pos;
     while (!scanner.isAtEnd()) {
       const c = scanner.peek();
-      if (ExpressionParser.isIdContinue(c) || c === '/' || c === '.' || c === '-') {
+      if (isIdContinue(c) || c === '/' || c === '.' || c === '-') {
         scanner.advance();
       } else {
         break;
@@ -251,7 +251,7 @@ export class ExpressionParser {
 
   private scanIdentifier(scanner: Scanner): string {
     const start = scanner.pos;
-    while (!scanner.isAtEnd() && ExpressionParser.isIdContinue(scanner.peek())) {
+    while (!scanner.isAtEnd() && isIdContinue(scanner.peek())) {
       scanner.advance();
     }
     return scanner.input.substring(start, scanner.pos);
@@ -291,28 +291,19 @@ export class ExpressionParser {
     return Number(text);
   }
 
-  static readonly XID_CONTINUE = /\p{XID_Continue}/u;
-  /** @deprecated Kept for backwards compatibility. */
-  static readonly UNICODE_ALNUM = ExpressionParser.XID_CONTINUE;
-
-  static isIdContinue(c: string): boolean {
-    if (!c || c === '\0') return false;
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c === '_') {
-      return true;
-    }
-    if (c.charCodeAt(0) < 128) {
-      return false;
-    }
-    return ExpressionParser.XID_CONTINUE.test(c);
-  }
-
-  private isAlnum(c: string): boolean {
-    return ExpressionParser.isIdContinue(c);
-  }
-
   private isDigit(c: string): boolean {
     return c >= '0' && c <= '9';
   }
+}
+
+const XID_CONTINUE_REGEX = /^\p{XID_Continue}$/u;
+
+function isIdContinue(input: string): boolean {
+  if (Array.from(input).length !== 1) {
+    return false;
+  }
+
+  return XID_CONTINUE_REGEX.test(input);
 }
 
 class Scanner {
@@ -324,13 +315,22 @@ class Scanner {
   }
 
   peek(offset = 0): string {
-    if (this.pos + offset >= this.input.length) return '\0';
-    return this.input[this.pos + offset];
+    const targetPos = this.pos + offset;
+    if (targetPos >= this.input.length) return '\0';
+
+    // 1. Get the numeric 32-bit code point at the target index
+    const codePoint = this.input.codePointAt(targetPos);
+    if (codePoint === undefined) return '\0';
+
+    // 2. Convert that code point back to its full string representation.
+    // String.fromCodePoint correctly reconstructs surrogate pairs automatically.
+    return String.fromCodePoint(codePoint);
   }
 
-  advance(count = 1): string {
-    const char = this.input.substring(this.pos, this.pos + count);
-    this.pos += count;
+  advance(count?: number): string {
+    const step = count ?? (this.peek() === '\0' ? 1 : this.peek().length);
+    const char = this.input.substring(this.pos, this.pos + step);
+    this.pos += step;
     return char;
   }
 
@@ -356,7 +356,7 @@ class Scanner {
   matchesKeyword(keyword: string): boolean {
     if (this.input.startsWith(keyword, this.pos)) {
       const next = this.peek(keyword.length);
-      if (!ExpressionParser.isIdContinue(next)) {
+      if (!isIdContinue(next)) {
         this.advance(keyword.length);
         return true;
       }

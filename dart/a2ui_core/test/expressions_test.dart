@@ -107,6 +107,16 @@ void main() {
       expect(parser.parse(r'${true1}'), [
         {'path': 'true1'},
       ]);
+      expect(parser.parse(r'${true𐐷}'), [
+        {'path': 'true𐐷'},
+      ]);
+      // Supplementary plane Unicode characters (U+10437 Deseret Small Letter Yee)
+      expect(parser.parse(r'${𐐷}'), [
+        {'path': '𐐷'},
+      ]);
+      expect(parser.parse(r'${a𐐷b}'), [
+        {'path': 'a𐐷b'},
+      ]);
       // Identifiers in function calls
       expect(parser.parseExpression('add(número: 10, 日本: 20)'), {
         'call': 'add',

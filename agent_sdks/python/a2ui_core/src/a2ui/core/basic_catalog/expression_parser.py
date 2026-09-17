@@ -13,17 +13,17 @@
 # limitations under the License.
 
 from typing import Any, Dict, List, Union
+import regex
+
+# Compiled pattern matching exactly one XID_Continue character
+XID_CONTINUE_PATTERN = regex.compile(r"^\p{XID_Continue}$")
 
 
-def _is_id_continue(c: str) -> bool:
+def _is_id_continue(char: str) -> bool:
     """Returns True if character belongs to Unicode UAX #31 XID_Continue."""
-    if not c or len(c) != 1 or c == "\0":
+    if not char or len(char) != 1:
         return False
-    if ("a" <= c <= "z") or ("A" <= c <= "Z") or ("0" <= c <= "9") or c == "_":
-        return True
-    if ord(c) < 128:
-        return False
-    return ("a" + c).isidentifier()
+    return bool(XID_CONTINUE_PATTERN.match(char))
 
 
 class Scanner:

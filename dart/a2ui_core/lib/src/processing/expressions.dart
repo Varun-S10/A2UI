@@ -258,29 +258,21 @@ class ExpressionParser {
     return num.parse(text);
   }
 
-  static final RegExp _xidContinue = RegExp(r'\p{XID_Continue}', unicode: true);
-
-  static bool _isIdContinue(String c) {
-    if (c.isEmpty) return false;
-    final int u = c.codeUnitAt(0);
-    if ((u >= 0x30 && u <= 0x39) || // 0-9
-        (u >= 0x41 && u <= 0x5A) || // A-Z
-        (u >= 0x61 && u <= 0x7A) || // a-z
-        u == 0x5F) {
-      // _
-      return true;
-    }
-    if (u < 128) {
-      return false;
-    }
-    return _xidContinue.hasMatch(c);
-  }
-
   bool _isDigit(String c) {
     if (c.isEmpty) return false;
     final int u = c.codeUnitAt(0);
     return u >= 0x30 && u <= 0x39;
   }
+}
+
+final RegExp _xidContinueRegex = RegExp(r'^\p{XID_Continue}$', unicode: true);
+
+bool _isIdContinue(String char) {
+  if (char.runes.length != 1) {
+    return false;
+  }
+
+  return _xidContinueRegex.hasMatch(char);
 }
 
 class _Scanner {
@@ -291,14 +283,27 @@ class _Scanner {
 
   bool get isAtEnd => pos >= input.length;
 
+  // Unicode-safe peek: Returns a full String representation of the code point,
+  // correctly handling surrogate pairs.
   String peek([int offset = 0]) {
-    if (pos + offset >= input.length) return '';
-    return input[pos + offset];
+    final int targetPos = pos + offset;
+    if (targetPos >= input.length) return '';
+
+    final int endPos = targetPos + 2 <= input.length
+        ? targetPos + 2
+        : input.length;
+
+    // Safely extract the full 32-bit code point
+    final int codePoint = input.substring(targetPos, endPos).runes.first;
+
+    // Convert it back to a valid String
+    return String.fromCharCode(codePoint);
   }
 
-  String advance([int count = 1]) {
-    final String result = input.substring(pos, pos + count);
-    pos += count;
+  String advance([int? count]) {
+    final int step = count ?? (peek().isEmpty ? 1 : peek().length);
+    final String result = input.substring(pos, pos + step);
+    pos += step;
     return result;
   }
 
@@ -317,7 +322,7 @@ class _Scanner {
   bool matchesKeyword(String keyword) {
     if (input.startsWith(keyword, pos)) {
       final String next = peek(keyword.length);
-      if (next.isEmpty || !_isWordChar(next)) {
+      if (next.isEmpty || !_isIdContinue(next)) {
         advance(keyword.length);
         return true;
       }
@@ -334,8 +339,6 @@ class _Scanner {
   String substring(int start, [int? end]) {
     return input.substring(start, end);
   }
-
-  static bool _isWordChar(String c) => ExpressionParser._isIdContinue(c);
 
   static bool _isWhitespace(int u) {
     return u == 0x20 || u == 0x09 || u == 0x0A || u == 0x0D; // space/tab/LF/CR
