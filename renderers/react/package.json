@@ -75,7 +75,7 @@
   ],
   "scripts": {
     "prepublishOnly": "node -e \"console.error('Error: Do not publish this package directly. Use yarn publish:package instead.'); process.exit(1);\"",
-    "publish:package": "yarn build && node ../scripts/prepare-publish.mjs && npm publish dist/ --access public",
+    "publish:package": "yarn build && yarn npm publish --access public",
     "build": "wireit",
     "demo": "yarn workspace @a2ui/react-explorer dev",
     "test": "wireit",
