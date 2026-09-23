@@ -82,7 +82,7 @@
         "../../specification/v0_9/json/*.json",
         "../../specification/v0_9/catalogs/**/*.json",
         "../../specification/v1_0/json/*.json",
-        "../../specification/v1_0/catalogs/**/*.json",
+        "../../catalogs/basic/**/*.json",
         "scripts/copy-spec.js"
       ],
       "output": [
@@ -170,6 +170,7 @@
     "@preact/signals-core": "^1.14.2",
     "date-fns": "^4.4.0",
     "lit": "^3.3.3",
+    "validate-color": "^2.2.4",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.25.2"
   }

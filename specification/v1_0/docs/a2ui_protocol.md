@@ -1497,6 +1497,8 @@ An agent advertises its capabilities using the [`agent_capabilities.json`] schem
 
 The `a2uiRendererCapabilities` object in the transport metadata follows the [`renderer_capabilities.json`] schema to describe the renderer's capabilities.
 
+If `a2uiRendererCapabilities` is carried on message metadata (eg, in A2A), it should be scoped to that conversation turn, and omitting it on subsequent messages should withdraw A2UI support for those turns. If `a2uiRendererCapabilities` is carried on session metadata (eg, in MCP initialize) it should be scoped to the session.
+
 **Properties:**
 
 - `v1.0` (object, required): The capability structure for version 1.0 of the A2UI protocol.
@@ -1549,7 +1551,7 @@ Renderers and client SDKs expose surface and component metadata using uniform ac
 [`agent_capabilities.json`]: ../json/agent_capabilities.json
 [`agent_to_renderer.json`]: ../json/agent_to_renderer.json
 [`catalog_definition.json`]: ../json/catalog_definition.json
-[`catalogs/basic/catalog.json`]: ../catalogs/basic/catalog.json
+[`catalogs/basic/catalog.json`]: ../../../catalogs/basic/v1/catalog.json
 [`common_types.json`]: ../json/common_types.json
 [`renderer_capabilities.json`]: ../json/renderer_capabilities.json
 [`renderer_data_model.json`]: ../json/renderer_data_model.json
