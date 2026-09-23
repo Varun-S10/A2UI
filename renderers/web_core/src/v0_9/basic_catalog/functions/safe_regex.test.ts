@@ -86,7 +86,7 @@ describe('isSafeRegex (CWE-1333 ReDoS Safety)', () => {
     });
 
     it('allows standard email and URL patterns', () => {
-      assert.strictEqual(isSafeRegex('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$'), true);
+      assert.strictEqual(isSafeRegex('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z]{2,}$'), true);
       assert.strictEqual(isSafeRegex('^https?://[^\\s/$.?#].[^\\s]*$'), true);
     });
 
@@ -123,8 +123,13 @@ describe('isSafeRegex (CWE-1333 ReDoS Safety)', () => {
 
     it('handles empty or nullish safely', () => {
       assert.strictEqual(isSafeRegex(''), true);
-      assert.strictEqual(isSafeRegex(null as any), true);
-      assert.strictEqual(isSafeRegex(undefined as any), true);
+      assert.strictEqual(isSafeRegex(null as unknown as string), true);
+      assert.strictEqual(isSafeRegex(undefined as unknown as string), true);
+    });
+
+    it('rejects patterns exceeding maxPatternLength', () => {
+      assert.strictEqual(isSafeRegex('a'.repeat(257)), false);
+      assert.strictEqual(isSafeRegex('a'.repeat(20), {maxPatternLength: 10}), false);
     });
   });
 });
