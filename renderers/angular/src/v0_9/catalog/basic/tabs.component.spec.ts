@@ -18,7 +18,7 @@ import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {Component, input} from '@angular/core';
 import {By} from '@angular/platform-browser';
 import {TabsComponent} from './tabs.component';
-import {ComponentModel, DynamicString} from '@a2ui/web_core/v0_9';
+import {ComponentModel, DynamicString, SurfaceComponentsModel} from '@a2ui/web_core/v0_9';
 import {A2uiRendererService} from '../../core/a2ui-renderer.service';
 import {ComponentBinder} from '../../core/component-binder.service';
 import {setComponentProps, createBoundProperty, ComponentToProps} from '@a2ui/angular/testing';
@@ -42,17 +42,25 @@ describe('TabsComponent', () => {
   let defaultProps: ComponentToProps<TabsComponent>;
 
   beforeEach(async () => {
+    const mockCatalog = {
+      id: 'mock-catalog',
+      components: new Map([['Text', {type: 'Text', component: DummyTextComponent}]]),
+    } as any;
+
+    const componentsModel = new SurfaceComponentsModel();
+    componentsModel.addComponent(
+      new ComponentModel('content-1', 'Text', {text: {value: 'Content 1'}}, mockCatalog),
+    );
+    componentsModel.addComponent(
+      new ComponentModel('content-2', 'Text', {text: {value: 'Content 2'}}, mockCatalog),
+    );
+
     const mockRendererService = {
       surfaceGroup: {
         getSurface: jasmine.createSpy('getSurface').and.returnValue({
-          componentsModel: new Map([
-            ['content-1', new ComponentModel('content-1', 'Text', {text: {value: 'Content 1'}})],
-            ['content-2', new ComponentModel('content-2', 'Text', {text: {value: 'Content 2'}})],
-          ]),
-          catalog: {
-            id: 'mock-catalog',
-            components: new Map([['Text', {type: 'Text', component: DummyTextComponent}]]),
-          },
+          componentsModel,
+          defaultCatalog: mockCatalog,
+          availableCatalogs: new Map(),
         }),
       },
     };

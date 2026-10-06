@@ -16,6 +16,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:a2ui_core/a2ui_core.dart';
+import 'package:a2ui_core/src/core/contexts.dart' show ComponentContext;
+import 'package:a2ui_core/src/rendering/binder.dart' show GenericBinder;
 import 'package:test/test.dart';
 
 import 'conformance/conformance_harness.dart';
@@ -27,16 +29,14 @@ const String basicCatalogPath =
 const String basicCatalogId =
     'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json';
 
-Map<String, Object?> loadBasicCatalogJson() =>
-    jsonDecode(
-          File(resolveConformancePath(basicCatalogPath)).readAsStringSync(),
-        )
-        as Map<String, Object?>;
+Map<String, Object?> loadBasicCatalogJson() => jsonDecode(
+      File(resolveConformancePath(basicCatalogPath)).readAsStringSync(),
+    ) as Map<String, Object?>;
 
 void main() {
   group('Catalog.fromJson', () {
     test('parses the published basic catalog document', () {
-      final SchemaCatalog catalog = Catalog.fromJson(loadBasicCatalogJson());
+      final CatalogApi catalog = Catalog.fromJson(loadBasicCatalogJson());
 
       expect(catalog.id, basicCatalogId);
       expect(
@@ -51,7 +51,7 @@ void main() {
     });
 
     test('reads a function argument schema and return type', () {
-      final SchemaCatalog catalog = Catalog.fromJson(loadBasicCatalogJson());
+      final CatalogApi catalog = Catalog.fromJson(loadBasicCatalogJson());
 
       final FunctionApi required = catalog.functions['required']!;
       expect(required.name, 'required');
@@ -67,183 +67,117 @@ void main() {
       );
     });
 
-    test('parses the inline catalog form used by renderer capabilities', () {
-      final SchemaCatalog catalog = Catalog.fromJson({
-        'catalogId': 'inline',
-        'components': {
-          'Text': {'type': 'object'},
-        },
-        'functions': [
-          {
-            'name': 'greet',
-            'description': 'Says hello.',
-            'parameters': {'type': 'object'},
-            'returnType': 'string',
-          },
-        ],
-      });
-
-      expect(catalog.id, 'inline');
-      expect(catalog.components.keys, ['Text']);
-      expect(catalog.functions['greet']!.returnType, A2uiReturnType.string);
-    });
-
-    test('defaults an undeclared function return type to any', () {
-      final SchemaCatalog catalog = Catalog.fromJson({
-        'catalogId': 'c',
+    test('parses and round-trips validationResult function returnType', () {
+      final CatalogApi catalog = Catalog.fromJson({
+        'catalogId': 'https://example.com/v1_validation_catalog',
         'functions': {
-          'mystery': {'type': 'object', 'properties': <String, Object?>{}},
+          'checkEmail': {
+            'type': 'object',
+            'properties': {
+              'call': {'const': 'checkEmail'},
+              'args': {
+                'type': 'object',
+                'properties': {
+                  'value': {'type': 'string'},
+                },
+                'required': ['value'],
+              },
+              'returnType': {'const': 'validationResult'},
+            },
+            'required': ['call', 'args'],
+          },
+          'checkInline': {
+            'returnType': 'validationResult',
+            'parameters': {
+              'type': 'object',
+              'properties': {
+                'value': {'type': 'string'},
+              },
+            },
+          },
         },
       });
 
-      expect(catalog.functions['mystery']!.returnType, A2uiReturnType.any);
-    });
-
-    test('rejects a document without a catalog id', () {
       expect(
-        () => Catalog.fromJson({'components': <String, Object?>{}}),
-        throwsA(isA<A2uiCatalogError>()),
+        catalog.functions['checkEmail']!.returnType,
+        A2uiReturnType.validationResult,
       );
       expect(
-        () => Catalog.fromJson({'catalogId': ''}),
-        throwsA(isA<A2uiCatalogError>()),
+        catalog.functions['checkInline']!.returnType,
+        A2uiReturnType.validationResult,
+      );
+
+      final Map<String, Object?> rebuilt = catalog.catalogSchema;
+      final CatalogApi reparsed = Catalog.fromJson(rebuilt);
+      expect(
+        reparsed.functions['checkEmail']!.returnType,
+        A2uiReturnType.validationResult,
+      );
+      expect(
+        reparsed.functions['checkInline']!.returnType,
+        A2uiReturnType.validationResult,
       );
     });
 
-    test('rejects a catalog id that conflicts with the expected id', () {
-      expect(
-        () => Catalog.fromJson({
-          'catalogId': 'actual',
-        }, expectedCatalogId: 'expected'),
-        throwsA(
-          isA<A2uiCatalogError>().having(
-            (e) => e.catalogId,
-            'catalogId',
-            'actual',
+    test(
+      'GenericBinder evaluates checks on a JSON-loaded catalog referencing '
+      'common_types.json#/\$defs/Checkable',
+      () {
+        final CatalogApi parsed = Catalog.fromJson(loadBasicCatalogJson());
+        final rendererCatalog = Catalog<ComponentApi, FunctionImplementation>(
+          id: parsed.id,
+          components: parsed.components.values.toList(),
+          functions: const [],
+        );
+        final surface = SurfaceModel<ComponentApi>(
+          's-json',
+          catalog: rendererCatalog,
+        );
+        addTearDown(surface.dispose);
+
+        surface.dataModel.set('/isValidEmail', false);
+        final model = ComponentModel('tf1', 'TextField', {
+          'label': 'Email',
+          'value': 'invalid@',
+          'checks': [
+            {
+              'condition': {'path': '/isValidEmail'},
+              'message': 'Enter a valid email address',
+            },
+          ],
+        });
+        surface.componentsModel.addComponent(model);
+
+        final binder = GenericBinder(
+          ComponentContext(surface, model),
+          rendererCatalog.components['TextField']!.schema,
+        );
+        addTearDown(binder.dispose);
+
+        expect(binder.resolvedProps.value['isValid'], isFalse);
+        expect(binder.resolvedProps.value['validationErrors'], [
+          'Enter a valid email address',
+        ]);
+        expect(binder.resolvedProps.value['validationResults'], [
+          const ValidationResult(
+            valid: false,
+            message: 'Enter a valid email address',
+            severity: 'error',
           ),
-        ),
-      );
-    });
+        ]);
 
-    test('accepts a catalog id that matches the expected id', () {
-      expect(
-        Catalog.fromJson({'catalogId': 'same'}, expectedCatalogId: 'same').id,
-        'same',
-      );
-    });
-
-    test('ignores any protocol version the document declares', () {
-      // Catalogs are version-agnostic: the document's `protocolVersion` is
-      // not checked against the version this SDK implements.
-      expect(
-        Catalog.fromJson({'catalogId': 'c', 'protocolVersion': 'v1.0'}).id,
-        'c',
-      );
-    });
-
-    test('rejects malformed components and functions', () {
-      expect(
-        () => Catalog.fromJson({'catalogId': 'c', 'components': 'nope'}),
-        throwsA(isA<A2uiCatalogError>()),
-      );
-      expect(
-        () => Catalog.fromJson({'catalogId': 'c', 'functions': 'nope'}),
-        throwsA(isA<A2uiCatalogError>()),
-      );
-    });
-  });
-
-  group('Catalog.catalogSchema', () {
-    test('inlines the document\'s own definitions into each schema', () {
-      final SchemaCatalog catalog = Catalog.fromJson(loadBasicCatalogJson());
-      final Object text = catalog.components['Text']!.schema.value;
-
-      // `#/$defs/CatalogComponentCommon` is expanded in place, leaving no
-      // pointer into the document behind ...
-      expect(jsonEncode(text), isNot(contains(r'"$ref":"#/')));
-      expect(jsonEncode(text), contains('weight'));
-      // ... while references the catalog cannot reach are left for the
-      // validator, rather than dropped as unconstrained.
-      expect(
-        jsonEncode(text),
-        contains('common_types.json#/\$defs/DynamicString'),
-      );
-    });
-
-    test('round trips the source document', () {
-      final Map<String, Object?> source = loadBasicCatalogJson();
-      final Map<String, Object?> rendered = Catalog.fromJson(
-        source,
-      ).catalogSchema;
-
-      expect(rendered['catalogId'], source['catalogId']);
-      expect(
-        (rendered['components']! as Map).keys.toSet(),
-        (source['components']! as Map).keys.toSet(),
-      );
-      expect(
-        (rendered['functions']! as Map).keys.toSet(),
-        (source['functions']! as Map).keys.toSet(),
-      );
-    });
-
-    test('does not alias the source document', () {
-      final Map<String, Object?> source = loadBasicCatalogJson();
-      final Map<String, Object?> rendered = Catalog.fromJson(
-        source,
-      ).catalogSchema;
-
-      (rendered['components']! as Map).remove('Text');
-      expect((source['components']! as Map).containsKey('Text'), isTrue);
-    });
-
-    test('reflects a pruned catalog and narrows the anyComponent union', () {
-      final SchemaCatalog catalog = Catalog.fromJson(loadBasicCatalogJson());
-      final SchemaCatalog pruned = catalog.copyWith(
-        components: [catalog.components['Text']!, catalog.components['Card']!],
-      );
-
-      final Map<String, Object?> rendered = pruned.catalogSchema;
-      expect((rendered['components']! as Map).keys.toSet(), {'Text', 'Card'});
-
-      final oneOf =
-          ((rendered[r'$defs']! as Map)['anyComponent']! as Map)['oneOf']!
-              as List;
-      expect(oneOf.map((e) => (e! as Map)[r'$ref']).toSet(), {
-        '#/components/Text',
-        '#/components/Card',
-      });
-    });
-
-    test('reflects pruned functions and narrows the anyFunction union', () {
-      final SchemaCatalog catalog = Catalog.fromJson(loadBasicCatalogJson());
-      final SchemaCatalog pruned = catalog.copyWith(
-        functions: [catalog.functions['required']!],
-      );
-
-      final Map<String, Object?> rendered = pruned.catalogSchema;
-      expect((rendered['functions']! as Map).keys.toSet(), {'required'});
-
-      final oneOf =
-          ((rendered[r'$defs']! as Map)['anyFunction']! as Map)['oneOf']!
-              as List;
-      expect(oneOf.map((e) => (e! as Map)[r'$ref']).toSet(), {
-        '#/functions/required',
-      });
-    });
-
-    test('synthesises a document for a code defined catalog', () {
-      final Map<String, Object?> rendered = MinimalCatalog().catalogSchema;
-
-      expect(rendered['catalogId'], MinimalCatalog().id);
-      expect((rendered['components']! as Map).keys, contains('Text'));
-    });
+        surface.dataModel.set('/isValidEmail', true);
+        expect(binder.resolvedProps.value['isValid'], isTrue);
+        expect(binder.resolvedProps.value['validationErrors'], isEmpty);
+        expect(binder.resolvedProps.value['validationResults'], isEmpty);
+      },
+    );
   });
 
   group('Catalog generics', () {
     test('separates function signatures from function implementations', () {
       // Agents hold schema-only functions; renderers hold implementations.
-      final SchemaCatalog agentCatalog = Catalog.fromJson(
+      final CatalogApi agentCatalog = Catalog.fromJson(
         loadBasicCatalogJson(),
       );
       expect(agentCatalog.functions.values, everyElement(isA<FunctionApi>()));

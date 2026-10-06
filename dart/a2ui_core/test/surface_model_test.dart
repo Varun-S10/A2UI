@@ -55,5 +55,102 @@ void main() {
       // double-counted.
       expect(actionCount, 1);
     });
+
+    test(
+      'reports functionCall and call actions to onError',
+      () async {
+        final surface = SurfaceModel<ComponentApi>('s1', catalog: catalog);
+        var actionCount = 0;
+        final errors = <A2uiClientError>[];
+        surface.onAction.addListener((_) => actionCount++);
+        surface.onError.addListener(errors.add);
+
+        await surface.dispatchAction({
+          'functionCall': {'call': 'doTask', 'args': <String, dynamic>{}},
+        }, 'c1');
+        expect(actionCount, 0);
+        expect(errors, hasLength(1));
+        expect(errors.last.code, 'INVALID_ACTION');
+
+        await surface.dispatchAction({
+          'call': 'doTask',
+          'args': <String, dynamic>{},
+        }, 'c1');
+        expect(actionCount, 0);
+        expect(errors, hasLength(2));
+        expect(errors.last.code, 'INVALID_ACTION');
+      },
+    );
+
+    test('dispatches direct name action with userMessage', () {
+      final surface = SurfaceModel<ComponentApi>('s1', catalog: catalog);
+      A2uiClientAction? dispatched;
+      surface.onAction.addListener((action) => dispatched = action);
+
+      surface.dispatchAction({
+        'name': 'submit_name',
+        'userMessage': 'Action performed',
+        'context': {'key': 'val'},
+      }, 'c1');
+
+      expect(dispatched, isNotNull);
+      expect(dispatched!.name, 'submit_name');
+      expect(dispatched!.userMessage, 'Action performed');
+      expect(dispatched!.context, {'key': 'val'});
+    });
+
+    test('safely normalizes non-map context and non-string userMessage', () {
+      final surface = SurfaceModel<ComponentApi>('s1', catalog: catalog);
+      A2uiClientAction? dispatched;
+      surface.onAction.addListener((action) => dispatched = action);
+
+      surface.dispatchAction({
+        'name': 'test_action',
+        'context': 'not_a_map',
+        'userMessage': 12345,
+      }, 'c1');
+
+      expect(dispatched, isNotNull);
+      expect(dispatched!.name, 'test_action');
+      expect(dispatched!.context, isEmpty);
+      expect(dispatched!.userMessage, isNull);
+    });
+
+    test('reports an event whose name is missing, empty, or not a string',
+        () async {
+      final surface = SurfaceModel<ComponentApi>('s1', catalog: catalog);
+      A2uiClientAction? dispatched;
+      final errors = <A2uiClientError>[];
+      surface.onAction.addListener((action) => dispatched = action);
+      surface.onError.addListener(errors.add);
+
+      await surface.dispatchAction({
+        'event': {'name': 42},
+      }, 'c1');
+      await surface.dispatchAction({'name': 42}, 'c1');
+      await surface.dispatchAction({
+        'event': {'name': ''},
+      }, 'c1');
+      await surface.dispatchAction({'foo': 'bar'}, 'c1');
+
+      expect(dispatched, isNull);
+      expect(errors, hasLength(4));
+      expect(errors.every((e) => e.code == 'INVALID_ACTION'), isTrue);
+    });
+
+    test('dispatches action with UTC timestamp that serializes with trailing Z',
+        () {
+      final surface = SurfaceModel<ComponentApi>('s1', catalog: catalog);
+      A2uiClientAction? dispatched;
+      surface.onAction.addListener((action) => dispatched = action);
+
+      surface.dispatchAction({
+        'event': {'name': 'submit'},
+      }, 'c1');
+
+      expect(dispatched, isNotNull);
+      expect(dispatched!.timestamp.isUtc, isTrue);
+      expect(dispatched!.toJson()['timestamp'], endsWith('Z'));
+    });
   });
 }
