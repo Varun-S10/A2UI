@@ -141,16 +141,16 @@ a2ui/core/
 │   ├── events                      # EventSource / listener plumbing
 │   └── semver                      # Protocol version comparison
 ├── expressions/                    # Protocol-version-agnostic expression parser
-├── basic_catalog/                  # Bundled default components and operators
+├── basic_catalog/                  # Bundled default components and functions
 │   ├── v0_8/                       # Conforms to spec v0.8
 │   ├── v0_9/                       # Conforms to spec v0.9, v0.9.1
 │   ├── v1_0/                       # Conforms to spec v1.0
-│   ├── operator_apis               # Operator function signatures
-│   └── locale_config               # Locale defaults for formatting functions
+│   └── locale_formatting           # CLDR locale rules Babel does not implement
 ├── catalog/                        # Catalog declarations
 │   ├── catalog                     # Catalog base class & inlining
 │   ├── components                  # Component declarations & API
-│   └── functions                   # Function declarations & implementations
+│   ├── functions                   # Function declarations & implementations
+│   └── system_functions            # Runtime-supplied '@' functions, shared by all versions
 ├── state/                          # Reactive Layout State Models
 │   ├── component_model             # Component property structures
 │   ├── data_model                  # Value dictionary binding paths
@@ -239,7 +239,7 @@ export class Catalog<
 
 A `Catalog` is immutable once constructed.
 
-`TFunction` is instantiated as [`FunctionApi`](#functionapi--functionimplementation) for a schema-only catalog used to validate or describe payloads, and as `FunctionImplementation` for a catalog that can also execute its functions.
+`TFunction` is instantiated as [`FunctionApi`](#functionapi--functionimplementation) for a schema-only catalog used to validate or describe payloads, and as `FunctionImplementation` for a catalog that can also execute its functions. The schema-only case is named [`CatalogApi`](#catalogapi).
 
 Both parameters default to their constraint, so code that does not care about the concrete component or function type may write `Catalog` unparameterized. The rest of this document does so wherever the distinction is irrelevant.
 
@@ -322,6 +322,19 @@ Functions generally fall into a few common patterns:
 3.  **Effect Functions**: Side-effect handlers (e.g., `openUrl`, `closeModal`) that return `void`. These are triggered by user [**actions**](../../docs/public/concepts/glossary.md#action) rather than interpolation.
 
 If a function returns a reactive stream, it MUST use an idiomatic listening mechanism that supports standard unsubscription. To properly support an AI agent, functions SHOULD include a schema to generate accurate renderer capabilities.
+
+#### `CatalogApi`
+
+`CatalogApi` names the schema-only catalog, alongside `ComponentApi` and `FunctionApi`. Its components and functions carry schemas and no code.
+
+```typescript
+export type CatalogApi = Catalog<ComponentApi, FunctionApi>;
+```
+
+Every SDK that has a schema-only catalog exports it from its public facade under this name, as a type alias where the language has one. Parsing a catalog document produces a `CatalogApi`, since a document holds signatures only.
+
+- **Use `CatalogApi`** where functions are described or checked but never run: an agent writing a system prompt, validating generated payloads, or reading the inline catalogs in renderer capabilities.
+- **Use a catalog of `FunctionImplementation`** where functions are evaluated, as in a renderer resolving values or handling actions. APIs that evaluate functions SHOULD bound their catalog type to `FunctionImplementation`, so that passing a `CatalogApi` fails at compile time rather than resolving to nothing at runtime.
 
 #### The [Basic Catalog](../../docs/public/concepts/glossary.md#basic-catalog) Standard (Core APIs)
 
@@ -457,7 +470,6 @@ export interface MessageProcessorOptions {
 
 class MessageProcessor<T extends ComponentApi> {
   readonly model: SurfaceGroupModel<T>;
-  readonly version: ProtocolVersion;
   readonly rpc: RpcHandler;
 
   constructor(
@@ -478,13 +490,13 @@ class MessageProcessor<T extends ComponentApi> {
   ): Promise<T>;
 
   // Returns a strictly typed capabilities object ready for JSON serialization
-  getRendererCapabilities(options?: CapabilitiesOptions): A2uiRendererCapabilities;
+  getRendererCapabilities(options: CapabilitiesOptions): A2uiRendererCapabilities;
 
   /**
    * Returns the aggregated data model for all surfaces that have 'sendDataModel' enabled.
    * This should be used by the transport layer to populate metadata (e.g., 'A2uiRendererDataModel').
    */
-  getRendererDataModel(): A2uiRendererDataModel | undefined;
+  getRendererDataModel(version?: ProtocolVersion): A2uiRendererDataModel | undefined;
 
   /** Disposes the processor, its surfaces, and all pending outbound RPC requests. */
   dispose(reason?: string): void;
@@ -510,7 +522,9 @@ When a surface is created with `sendDataModel: true`, the renderer is responsibl
 **Implementation Flow:**
 
 1.  The `MessageProcessor` tracks the `sendDataModel` flag for each surface.
-2.  The `getRendererDataModel()` method iterates over all active surfaces and returns a map of data models for those where the flag is enabled.
+2.  The `getRendererDataModel(version?: ProtocolVersion)` method collects the data models of active surfaces where `sendDataModel` is enabled:
+    - If `version` is provided, it filters and returns only surfaces compatible with that protocol version.
+    - If `version` is omitted, it auto-infers the protocol version from the active surface(s). If active surfaces have conflicting protocol versions, it throws an `A2uiValidationError` requiring the caller to explicitly specify the target version.
 3.  The **Transport Layer** (e.g., A2A, MCP) calls `getRendererDataModel()` before sending any message to the agent.
 4.  If a non-empty data model map is returned, it is included in the transport's metadata field (e.g., `A2uiRendererDataModel` in A2A metadata).
 
@@ -529,11 +543,28 @@ Both sides advertise their capabilities to each other.
 
 Schemas live in `specification/<version>/json/`. v1.0 names the pair [`renderer_capabilities.json`](../../specification/v1_0/json/renderer_capabilities.json) and [`agent_capabilities.json`](../../specification/v1_0/json/agent_capabilities.json). v0.9 and v0.9.1 name the same pair [`client_capabilities.json`](../../specification/v0_9_1/json/client_capabilities.json) and [`server_capabilities.json`](../../specification/v0_9_1/json/server_capabilities.json), carried as `a2uiClientCapabilities` and `a2uiServerCapabilities`. v0.8 spells it differently again ([`a2ui_client_capabilities_schema.json`](../../specification/v0_8/json/a2ui_client_capabilities_schema.json)) and publishes no server-side counterpart.
 
+##### `CapabilitiesOptions`
+
+When invoking `getRendererCapabilities(options: CapabilitiesOptions)`, at least one protocol version must be specified in `options.versions` (otherwise an `A2uiValidationError` is thrown):
+
+```typescript
+export interface CapabilitiesOptions {
+  /** Protocol versions to generate capabilities for. Required; must contain at least one version. */
+  versions: ProtocolVersion[];
+  /** Whether full definitions of all catalogs will be included inline. */
+  includeInlineCatalogs?: boolean;
+  /** Base schema `$ref` to wrap component definitions in inline catalogs. Defaults to 'common_types.json#/$defs/ComponentCommon'. */
+  componentEnvelopeRef?: string;
+}
+```
+
+The returned `A2uiRendererCapabilities` map contains capability structures keyed by each protocol version specified in `versions` (e.g. `{"v0.9": {"supportedCatalogIds": [...]}, "v1.0": {"supportedCatalogIds": [...]}}`), strictly conforming to [`renderer_capabilities.json`](../../specification/v1_0/json/renderer_capabilities.json) where `supportedCatalogIds` is defined under the protocol version.
+
 #### Generating Renderer Capabilities and Schema Types
 
 To dynamically generate the `A2uiRendererCapabilities` payload (specifically `inlineCatalogs`), the processor must convert internal component schemas into valid JSON Schemas.
 
-**Schema Types Location**: Foundational schema types _should_ be defined in a dedicated directory like `schema`. You can see the `renderers/web_core/src/v1_0/schema/common-types.ts` file in the reference web implementation as an example.
+**Schema Types Location**: Foundational schema types _should_ be defined in a dedicated directory like `schema`. You can see the `typescript/web_core/src/v1_0/schema/common-types.ts` file in the reference web implementation as an example.
 
 **Detectable Common Types**: Shared definitions (like `DynamicString`) must emit external JSON Schema `$ref` pointers. This is achieved by "tagging" the schemas using their `description` property (e.g., `REF:common_types.json#/$defs/DynamicString`).
 
@@ -845,7 +876,6 @@ A component belongs to exactly one catalog, and from v1.0 one surface may mix ca
 - Raise `A2uiCatalogError` when a resolved `catalogId` is not one this processor supports.
 - Record the catalog on the `SurfaceModel` when the surface is created, so a later `updateComponents` resolves against it.
 - Expose `processMessages` as the single entry point for applying a payload to surface state and checking each message against the surface it joins. An agent uses it over its own output too, keeping a processor for the session so each payload is checked against the state the previous ones built.
-- Check every surface a payload creates as one graph once the payload has been applied: a `root` component exists, every reference resolves, and every component is reachable from the root. These three cannot be answered as each message arrives, because a payload may declare a parent before its child, so they answer for the surface the payload leaves behind rather than for each message in turn. `ValidationConfig` governs which of them run, so a caller whose transport delivers one surface across several payloads relaxes the ones that span them. A surface the payload only updates is an incremental update to a render it does not own, and is not held to them.
 - Envelope parsing is `AgentToRendererMessage.parseAll(payload, protocolVersion)`, not a validator method: it needs no catalog, which is what lets a payload be read before each message is matched to its surface.
 
 Envelope parsing takes no catalog: the protocol version tag and the single-update-type rule read none. Make it a static on the message type, so a payload can be parsed before each message is matched to a surface, and so to a catalog.
@@ -1275,7 +1305,7 @@ _Per-call catalog dispatch._ A `FunctionCall` may carry a `catalogId`. `DataCont
 
 This depends on `catalogId` surviving deserialization. If the `FunctionCall` model used at runtime is the pre-v1.0 shape (`call`, `args`, `returnType`), a strict schema library strips `catalogId` before resolution ever sees it, and every call silently resolves against the default catalog. Version-specific schema models must be selected by the surface's protocol version rather than aliased back to a legacy definition.
 
-_Recursion into nested containers._ `resolveDynamicValue` recurses into plain objects and arrays, resolving bindings at any depth. Returning a plain object unresolved means a nested binding such as `{"style": {"color": {"path": "/accent"}}}` reaches the renderer as a raw pointer object. Recovering that only through a higher-level schema walk leaves direct `DataContext` callers, including conformance harnesses, with different results from the framework path.
+_Recursion into nested containers._ `resolveDynamicValue` recurses into plain objects and arrays, resolving bindings at any depth. Returning a plain object unresolved means a nested binding such as `{"style": {"color": {"@path": "/accent"}}}` reaches the renderer as a raw pointer object. Recovering that only through a higher-level schema walk leaves direct `DataContext` callers, including conformance harnesses, with different results from the framework path.
 
 _Expression errors are dispatched, not thrown._ A failure while evaluating a bound expression (unknown function, bad arguments, unresolvable catalog) dispatches an `EXPRESSION_ERROR` to the surface and yields an undefined value for that binding. Throwing out of the resolution pass aborts the whole tree, so one malformed binding blanks an otherwise renderable surface. The RPC path is different: it returns a structured error response, since there is a caller waiting on a result.
 

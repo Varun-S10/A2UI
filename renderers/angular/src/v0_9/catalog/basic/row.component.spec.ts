@@ -18,7 +18,7 @@ import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {Component, input, signal} from '@angular/core';
 import {RowComponent} from './row.component';
 import {ColumnComponent} from './column.component';
-import {ComponentContext, ComponentModel} from '@a2ui/web_core/v0_9';
+import {ComponentContext, ComponentModel, SurfaceComponentsModel} from '@a2ui/web_core/v0_9';
 import {A2uiRendererService} from '../../core/a2ui-renderer.service';
 import {ComponentBinder} from '../../core/component-binder.service';
 import {By} from '@angular/platform-browser';
@@ -46,16 +46,20 @@ describe('RowComponent', () => {
   let defaultProps: ComponentToProps<RowComponent>;
 
   beforeEach(async () => {
+    const mockCatalog = {
+      id: 'test-catalog',
+      components: new Map([['Child', {component: DummyChild}]]),
+    } as any;
+
+    const componentsModel = new SurfaceComponentsModel();
+    componentsModel.addComponent(new ComponentModel('child1', 'Child', {}, mockCatalog));
+    componentsModel.addComponent(new ComponentModel('child2', 'Child', {}, mockCatalog));
+    componentsModel.addComponent(new ComponentModel('template1', 'Child', {}, mockCatalog));
+
     mockSurface = {
-      componentsModel: new Map([
-        ['child1', new ComponentModel('child1', 'Child', {})],
-        ['child2', new ComponentModel('child2', 'Child', {})],
-        ['template1', new ComponentModel('template1', 'Child', {})],
-      ]),
-      catalog: {
-        id: 'test-catalog',
-        components: new Map([['Child', {component: DummyChild}]]),
-      },
+      componentsModel,
+      defaultCatalog: mockCatalog,
+      availableCatalogs: new Map(),
     };
 
     mockSurfaceGroup = {
@@ -156,11 +160,17 @@ describe('RowComponent', () => {
   });
 
   it('should style direct Column/Row children with width: auto without affecting nested descendants', () => {
-    mockSurface.componentsModel.set('directCol', new ComponentModel('directCol', 'Column', {}));
-    mockSurface.componentsModel.set('nestedCol', new ComponentModel('nestedCol', 'Column', {}));
-    mockSurface.componentsModel.set('nestedRow', new ComponentModel('nestedRow', 'Row', {}));
-    mockSurface.catalog.components.set('Column', {component: ColumnComponent});
-    mockSurface.catalog.components.set('Row', {component: RowComponent});
+    mockSurface.componentsModel.addComponent(
+      new ComponentModel('directCol', 'Column', {}, mockSurface.defaultCatalog),
+    );
+    mockSurface.componentsModel.addComponent(
+      new ComponentModel('nestedCol', 'Column', {}, mockSurface.defaultCatalog),
+    );
+    mockSurface.componentsModel.addComponent(
+      new ComponentModel('nestedRow', 'Row', {}, mockSurface.defaultCatalog),
+    );
+    mockSurface.defaultCatalog.components.set('Column', {component: ColumnComponent});
+    mockSurface.defaultCatalog.components.set('Row', {component: RowComponent});
 
     mockBinder.bind.and.callFake((ctx: ComponentContext) => {
       if (ctx.componentModel.id === 'directCol') {

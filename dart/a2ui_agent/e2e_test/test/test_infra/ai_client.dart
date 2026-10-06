@@ -18,7 +18,7 @@ import 'api_key.dart';
 
 /// Sends one-turn requests to a Gemini model through `package:dartantic_ai`.
 class AiClient {
-  AiClient({String modelName = 'gemini-3.8-flash'})
+  AiClient({String modelName = 'gemini-3.6-flash'})
     : _agent = dartantic.Agent.forProvider(
         dartantic.GoogleProvider(apiKey: apiKeyForEval()),
         chatModelName: modelName,
@@ -28,11 +28,52 @@ class AiClient {
 
   /// Sends [userMessage] under [systemPrompt] and returns the complete
   /// response.
+  ///
+  /// Retries a failed request twice, since the API sometimes rejects one
+  /// under load (HTTP 503), and rethrows the last failure.
   Future<String> send(String systemPrompt, String userMessage) async {
-    final dartantic.ChatResult<String> result = await _agent.send(
-      userMessage,
-      history: [dartantic.ChatMessage.system(systemPrompt)],
-    );
-    return result.output;
+    for (var attempt = 1; ; attempt++) {
+      try {
+        final dartantic.ChatResult<String> result = await _agent.send(
+          userMessage,
+          history: [dartantic.ChatMessage.system(systemPrompt)],
+        );
+        if (result.finishReason != dartantic.FinishReason.stop) {
+          // ignore: avoid_print
+          print('The model stopped early: ${result.finishReason}.');
+        }
+        return result.output;
+      } on Exception {
+        if (attempt == 3) rethrow;
+        await Future<void>.delayed(Duration(seconds: 5 * attempt));
+      }
+    }
+  }
+
+  /// Sends [userMessage] under [systemPrompt] and yields the response as the
+  /// model streams it.
+  ///
+  /// Retries like [send] while nothing has been yielded; a failure after
+  /// that is rethrown, since the caller has already read part of the
+  /// response.
+  Stream<String> sendStream(String systemPrompt, String userMessage) async* {
+    for (var attempt = 1; ; attempt++) {
+      var yielded = false;
+      try {
+        await for (final dartantic.ChatResult<String> result
+            in _agent.sendStream(
+              userMessage,
+              history: [dartantic.ChatMessage.system(systemPrompt)],
+            )) {
+          if (result.output.isEmpty) continue;
+          yielded = true;
+          yield result.output;
+        }
+        return;
+      } on Exception {
+        if (yielded || attempt == 3) rethrow;
+        await Future<void>.delayed(Duration(seconds: 5 * attempt));
+      }
+    }
   }
 }

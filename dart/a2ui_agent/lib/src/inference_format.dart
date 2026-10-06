@@ -12,10 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'package:a2ui_core/a2ui_core.dart';
+
+import 'parser/parser.dart';
+import 'prompt/generator.dart';
+
 /// Selects the notation the LLM writes A2UI payloads in.
-///
-/// Only `ExpressFormatFactory` is supported; an `A2uiRequestProcessor` rejects
-/// any other.
 abstract class InferenceFormatFactory {
   const InferenceFormatFactory();
+
+  /// Creates the format for [catalogs], the catalogs active for one request.
+  ///
+  /// [examples] are the example turns its prompt shows the model, each the
+  /// list of messages making up one turn.
+  InferenceFormat createFormat(
+    List<CatalogApi> catalogs, {
+    List<List<AgentToRendererMessage>> examples = const [],
+  });
+}
+
+/// One inference format bound to the catalogs of one request: the prompt that
+/// teaches the LLM the format, and the parser that reads what the LLM wrote.
+abstract class InferenceFormat {
+  const InferenceFormat();
+
+  /// Renders the prompt snippet describing the format, the catalogs and the
+  /// examples.
+  PromptGenerator get promptGenerator;
+
+  /// Creates a parser for one LLM response.
+  Parser createParser();
 }

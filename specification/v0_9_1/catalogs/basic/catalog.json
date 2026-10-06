@@ -316,7 +316,7 @@
             },
             "align": {
               "type": "string",
-              "description": "Defines the alignment of children along the cross axis (horizontally). Defaults to 'start' so interactive/leaf children (e.g., Button, Icon) retain their intrinsic width rather than stretching unnaturally across the column, while full-width containers (e.g., Row, Divider) fill the available width.",
+              "description": "Defines the alignment of children along the cross axis (horizontally). Defaults to 'start' so interactive/leaf children (e.g., Button, Icon) retain their intrinsic width rather than stretching across the column, while full-width containers (e.g., Row, Divider) fill the available width.",
               "enum": ["center", "end", "start", "stretch"],
               "default": "start"
             }

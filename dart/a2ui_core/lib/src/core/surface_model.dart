@@ -16,9 +16,7 @@ import 'dart:async';
 
 import '../primitives/event_notifier.dart';
 import 'catalog.dart';
-import 'common.dart';
 import 'component_model.dart';
-import 'contexts.dart';
 import 'data_model.dart';
 import 'messages.dart';
 
@@ -28,6 +26,7 @@ class SurfaceModel<T extends ComponentApi> {
   final Catalog<T, FunctionImplementation> catalog;
   final Map<String, dynamic> theme;
   final bool sendDataModel;
+  final String? protocolVersion;
 
   final DataModel dataModel;
   final SurfaceComponentsModel componentsModel;
@@ -46,35 +45,84 @@ class SurfaceModel<T extends ComponentApi> {
     required this.catalog,
     this.theme = const {},
     this.sendDataModel = false,
-  }) : dataModel = DataModel(),
-       componentsModel = SurfaceComponentsModel();
+    this.protocolVersion,
+  })  : dataModel = DataModel(),
+        componentsModel = SurfaceComponentsModel();
 
-  /// Dispatches an action from this surface.
+  /// Emits an agent-bound action from this surface on [onAction].
+  ///
+  /// The [payload] is either `{'event': {'name': ..., 'context': ...,
+  /// 'userMessage': ...}}` or the same fields without the `event` wrapper.
+  /// Its values must already be resolved against the data model.
+  ///
+  /// Any other payload, including a `functionCall` or `call` action, or an
+  /// event whose `name` is missing, empty, or not a string, is reported on
+  /// [onError] with code `'INVALID_ACTION'` and not emitted on [onAction].
+  /// Local function actions run in `GenericBinder`, which calls this method
+  /// only for actions that go to the agent.
   Future<void> dispatchAction(
     Map<String, dynamic> payload,
     String sourceComponentId,
   ) async {
-    if (payload.containsKey('event')) {
-      final event = payload['event'] as Map<String, dynamic>;
-      final action = A2uiClientAction(
-        name: (event['name'] as String?) ?? 'unknown',
-        surfaceId: id,
-        sourceComponentId: sourceComponentId,
-        timestamp: DateTime.now(),
-        context: Map<String, dynamic>.from(
-          (event['context'] ?? <String, dynamic>{}) as Map,
+    final Map<String, dynamic> event;
+    if (payload.containsKey('event') && payload['event'] is Map) {
+      event = Map<String, dynamic>.from(payload['event'] as Map);
+    } else if (payload.containsKey('name')) {
+      event = payload;
+    } else {
+      await dispatchError(
+        A2uiClientError(
+          code: 'INVALID_ACTION',
+          surfaceId: id,
+          message: "Invalid action payload in component '$sourceComponentId': "
+              'missing event or action name.',
+          details: payload,
         ),
       );
-      _onAction.emit(action);
-    } else if (payload.containsKey('functionCall')) {
-      final callJson = payload['functionCall'] as Map<String, dynamic>;
-      final call = FunctionCall.fromJson(callJson);
-      catalog.invoke(
-        call.call,
-        Map<String, dynamic>.from(call.args),
-        DataContext(dataModel, catalog.invoke, '/'),
-      );
+      return;
     }
+
+    final Object? name = event['name'];
+    if (name is! String || name.isEmpty) {
+      await dispatchError(
+        A2uiClientError(
+          code: 'INVALID_ACTION',
+          surfaceId: id,
+          message: "Invalid action payload in component '$sourceComponentId': "
+              'action name must be a non-empty string.',
+          details: payload,
+        ),
+      );
+      return;
+    }
+
+    final Object? rawContext = event['context'];
+    final Map<String, dynamic> context;
+    if (rawContext is Map) {
+      final Object? detached = _detach(rawContext);
+      context = detached is Map<String, dynamic>
+          ? detached
+          : <String, dynamic>{
+              for (final MapEntry<Object?, Object?> entry in rawContext.entries)
+                entry.key.toString(): _detach(entry.value),
+            };
+    } else {
+      context = const <String, dynamic>{};
+    }
+
+    final action = A2uiClientAction(
+      name: name,
+      surfaceId: id,
+      sourceComponentId: sourceComponentId,
+      timestamp: DateTime.now().toUtc(),
+      context: context,
+      userMessage: event['userMessage'] is String
+          ? event['userMessage'] as String
+          : null,
+    );
+    _onAction.emit(action);
+    // Only event payloads are emitted; functionCall payloads are not
+    // dispatched here.
   }
 
   /// Dispatches an error from this surface.
@@ -90,3 +138,18 @@ class SurfaceModel<T extends ComponentApi> {
     _onError.dispose();
   }
 }
+
+/// Copies maps and lists, so an action listener cannot reach the component or
+/// data model the payload was resolved from.
+Object? _detach(Object? value) => switch (value) {
+      Map() when value.keys.every((key) => key is String) => <String, dynamic>{
+          for (final MapEntry<Object?, Object?> entry in value.entries)
+            entry.key as String: _detach(entry.value),
+        },
+      Map() => <Object?, Object?>{
+          for (final MapEntry<Object?, Object?> entry in value.entries)
+            entry.key: _detach(entry.value),
+        },
+      List() => <Object?>[for (final Object? item in value) _detach(item)],
+      _ => value,
+    };
