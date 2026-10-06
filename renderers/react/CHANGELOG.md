@@ -1,5 +1,30 @@
 ## Unreleased
 
+- (v0_9) **BREAKING CHANGE**: `@a2ui/react/v0_9` no longer ships a React implementation of the basic catalog. Import `basicCatalog` and the individual components from `@a2ui/web_core/v0_9/basic_catalog` instead; they render as W3C Custom Elements. [#2630](https://github.com/a2ui-project/a2ui/pull/2630)
+- (v0_9) **BREAKING CHANGE**: the basic catalog no longer server-renders, since custom elements produce no markup outside a browser. [#2630](https://github.com/a2ui-project/a2ui/pull/2630)
+- **BREAKING CHANGE**: (v0_9) Every catalog component now renders inside a custom element (`<a2ui-react-<name>>`, `display: contents`). [#2849](https://github.com/a2ui-project/a2ui/pull/2849)
+- (v0_9) A catalog can mix React implementations and universal Web Components (`WebComponentImplementation`), nested in either order. [#2849](https://github.com/a2ui-project/a2ui/pull/2849)
+
+## 0.12.0
+
+- Align with `@a2ui/web_core` multi-catalog and protocol versioning updates.
+- Bump dependencies for compatibility with `@a2ui/web_core: ^0.12.0`.
+
+## 0.11.1
+
+- (v0_9) Fix `ChoicePicker` radio groups colliding across surfaces: the radio group `name` is now unique per rendered instance instead of derived from the surface-scoped component id ([#2447](https://github.com/a2ui-project/a2ui/issues/2447)).
+
+## 0.11.0
+
+- (v0_9) Component implementations may supply a `view` that renders from a resolved `ComponentNode` (see `NodeViewProps` and `useSignalValue`) ([#2077](https://github.com/a2ui-project/a2ui/pull/2077)).
+- (v0_9) `A2uiSurface` renders through the node layer: each component re-renders only when its own data changes. Implementations without a `view` keep rendering through `render` ([#2393](https://github.com/a2ui-project/a2ui/pull/2393)).
+- **BREAKING CHANGE**: (v0_9) On schema-marked references, `buildChild`'s `basePath` argument selects among the instances the payload creates; it no longer creates an instance at a caller-chosen path. The rendered notice for such a request names the paths where instances exist and reports `UNRESOLVED_CHILD_REFERENCE` through `onError` ([#2393](https://github.com/a2ui-project/a2ui/pull/2393)).
+- **BREAKING CHANGE**: (v0_9) The raw-definition fallback and the `DeferredChild` export are removed. A child reference whose schema property carries no component-id marker renders an error notice naming the property and reports `UNRESOLVED_CHILD_REFERENCE` through `onError`, once per reference; mark the property with `componentId()` or `childList()`. The `ChildList` union is recognized by shape, and a plain array of component ids by its elements' markers ([#2393](https://github.com/a2ui-project/a2ui/pull/2393)).
+- (v0_9) When a late child arrives, its parent re-renders once as the placeholder is replaced ([#2393](https://github.com/a2ui-project/a2ui/pull/2393)).
+- (v0_9) The first render shows the loading state even for an already populated surface; content appears immediately after. Tests that assert on the very first render must wait for the next one ([#2393](https://github.com/a2ui-project/a2ui/pull/2393)).
+- (v0_9) Subtrees `A2uiSurface` previously resolved at reveal time (a closed `Modal`'s content, inactive `Tabs` children) resolve with the rest of the tree, so their function calls run and their errors are reported at message-processing time ([#2393](https://github.com/a2ui-project/a2ui/pull/2393)).
+- (v0_9) Unknown component types and cyclic references are reported through the surface's `onError`, once per component and data path while the condition persists; previously nothing was reported for them. The message for an unresolvable type now reads `Unknown component type: <type>` ([#2393](https://github.com/a2ui-project/a2ui/pull/2393)).
+
 ## 0.10.2
 
 - (v0_9) Normalize Safari placeholder text color for `DateTimeInput` by injecting WebKit-specific styles via a global stylesheet and adding the `.a2ui-date-time-input` class.

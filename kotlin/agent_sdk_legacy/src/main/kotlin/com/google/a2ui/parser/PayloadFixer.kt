@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,7 +74,18 @@ object PayloadFixer {
       }
     } catch (e: Exception) {
       logger.severe("Failed to parse JSON: ${e.message}")
-      throw A2uiParseException("Failed to parse JSON: ${e.message}", e)
+      val msg = e.message ?: ""
+      val hint =
+        if (
+          msg.contains("escape", ignoreCase = true) ||
+            msg.contains("Invalid escaped char", ignoreCase = true) ||
+            payload.contains(Regex("""\\[^"\\/bfnrtu]"""))
+        ) {
+          " - Help: Unescaped backslash found. In JSON strings, all backslashes must be escaped as '\\\\' (e.g. '\\\\approx', '\\\\alpha')."
+        } else {
+          ""
+        }
+      throw A2uiParseException("Failed to parse JSON: ${e.message}$hint", e)
     }
 
   /**

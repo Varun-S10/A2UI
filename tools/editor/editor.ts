@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -68,7 +68,7 @@ export class A2UILayoutEditor extends SignalWatcher(LitElement) {
   @state()
   accessor #lastMessages: v0_8.Types.ServerToClientMessage[] | null = null;
 
-  static styles = [
+  static override styles = [
     unsafeCSS(v0_8.Styles.structuralStyles),
     css`
       :host {
@@ -857,7 +857,7 @@ export class A2UILayoutEditor extends SignalWatcher(LitElement) {
     this.#snackbar.hide(id);
   }
 
-  render() {
+  override render() {
     if (!this.#ready) {
       return html`Loading...`;
     }

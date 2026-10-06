@@ -1,10 +1,10 @@
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,6 +43,33 @@ def test_load_a2ui_dataset(tmp_path: Path) -> None:
     assert dataset[0].target == "A test prompt."
     assert dataset[0].metadata is not None
     assert dataset[0].metadata["name"] == "testPrompt"
+
+
+def test_load_a2ui_dataset_maps_moved_catalog_path(tmp_path: Path) -> None:
+    d = tmp_path / "sub"
+    d.mkdir()
+    p = d / "dummy_prompts_moved_catalog.yaml"
+    p.write_text("""
+- name: legacyPath
+  description: Uses the pre-move v1.0 catalog location.
+  catalog: "specification/{version}/catalogs/basic/catalog.json"
+  messages:
+    - role: user
+      content: "Test input"
+- name: currentPath
+  description: Uses the current v1.0 catalog location.
+  catalog: "catalogs/basic/v1/catalog.json"
+  messages:
+    - role: user
+      content: "Test input"
+""")
+
+    dataset = load_a2ui_dataset(file_path=str(p), version="1.0")
+
+    assert len(dataset) == 2
+    for sample in dataset:
+        assert sample.metadata is not None
+        assert sample.metadata["catalog"] == "catalogs/basic/v1/catalog.json"
 
 
 def test_load_a2ui_dataset_file_not_found() -> None:

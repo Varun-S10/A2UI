@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {Component, input} from '@angular/core';
 import {ListComponent} from './list.component';
-import {ComponentModel} from '@a2ui/web_core/v0_9';
+import {ComponentModel, SurfaceComponentsModel} from '@a2ui/web_core/v0_9';
 import {A2uiRendererService} from '../../core/a2ui-renderer.service';
 import {ComponentBinder, Child} from '../../core/component-binder.service';
 import {setComponentProps, createBoundProperty, ComponentToProps} from '@a2ui/angular/testing';
@@ -38,20 +38,30 @@ class DummyTextComponent {
 describe('ListComponent', () => {
   let component: ListComponent;
   let fixture: ComponentFixture<ListComponent>;
-  let defaultProps: ComponentToProps<ListComponent>;
+  let defaultProps: ComponentToProps<ListComponent> & {
+    listStyle?: any;
+  };
 
   beforeEach(async () => {
+    const mockCatalog = {
+      id: 'mock-catalog',
+      components: new Map([['Text', {type: 'Text', component: DummyTextComponent}]]),
+    } as any;
+
+    const componentsModel = new SurfaceComponentsModel();
+    componentsModel.addComponent(
+      new ComponentModel('child-1', 'Text', {text: {value: 'Child 1'}}, mockCatalog),
+    );
+    componentsModel.addComponent(
+      new ComponentModel('child-2', 'Text', {text: {value: 'Child 2'}}, mockCatalog),
+    );
+
     const mockRendererService = {
       surfaceGroup: {
         getSurface: jasmine.createSpy('getSurface').and.returnValue({
-          componentsModel: new Map([
-            ['child-1', new ComponentModel('child-1', 'Text', {text: {value: 'Child 1'}})],
-            ['child-2', new ComponentModel('child-2', 'Text', {text: {value: 'Child 2'}})],
-          ]),
-          catalog: {
-            id: 'mock-catalog',
-            components: new Map([['Text', {type: 'Text', component: DummyTextComponent}]]),
-          },
+          componentsModel,
+          defaultCatalog: mockCatalog,
+          availableCatalogs: new Map(),
         }),
       },
     };
@@ -75,7 +85,7 @@ describe('ListComponent', () => {
       direction: createBoundProperty<'vertical' | 'horizontal' | undefined>('vertical'),
       listStyle: createBoundProperty<'none' | 'ordered' | 'unordered' | undefined>('none'),
     };
-    setComponentProps(fixture, defaultProps);
+    setComponentProps(fixture, defaultProps as any);
   });
 
   it('should create', () => {
@@ -90,7 +100,7 @@ describe('ListComponent', () => {
         {id: 'child-1', basePath: '/'},
         {id: 'child-2', basePath: '/'},
       ]),
-    });
+    } as any);
     fixture.detectChanges();
     const hosts = fixture.nativeElement.querySelectorAll('a2ui-v09-component-host');
     expect(hosts.length).toBe(2);
@@ -101,7 +111,7 @@ describe('ListComponent', () => {
       ...defaultProps,
       children: createBoundProperty([{id: 'child-1', basePath: '/'}]),
       listStyle: createBoundProperty<'none' | 'ordered' | 'unordered' | undefined>('ordered'),
-    });
+    } as any);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ol')).toBeTruthy();
   });
@@ -111,7 +121,7 @@ describe('ListComponent', () => {
       ...defaultProps,
       children: createBoundProperty([{id: 'child-1', basePath: '/'}]),
       listStyle: createBoundProperty<'none' | 'ordered' | 'unordered' | undefined>('unordered'),
-    });
+    } as any);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('ul')).toBeTruthy();
   });
@@ -121,7 +131,7 @@ describe('ListComponent', () => {
       ...defaultProps,
       children: createBoundProperty([{id: 'child-1', basePath: '/'}]),
       listStyle: createBoundProperty('div' as 'none' | 'ordered' | 'unordered' | undefined),
-    });
+    } as any);
     fixture.detectChanges();
     const divList = fixture.nativeElement.querySelector('.a2ui-list');
     expect(divList.tagName.toLowerCase()).toBe('div');
@@ -132,7 +142,7 @@ describe('ListComponent', () => {
       ...defaultProps,
       children: createBoundProperty([{id: 'child-1', basePath: '/'}]),
       direction: createBoundProperty<'vertical' | 'horizontal' | undefined>('horizontal'),
-    });
+    } as any);
     fixture.detectChanges();
     const list = fixture.nativeElement.querySelector('.a2ui-list');
     expect(list.classList).toContain('horizontal');

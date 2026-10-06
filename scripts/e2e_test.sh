@@ -1,11 +1,11 @@
 #!/bin/bash
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,6 +26,25 @@
 # To run script locally, you need to set API key as an environment variable.
 # Example: export GEMINI_API_KEY=your_api_key
 
-cd "$(dirname "$0")/../samples/client/flutter/restaurant_finder/e2e_test"
-# Parallel tests are disabled to avoid conflicts on environment. 
-flutter test --concurrency=1 --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY"
+# No exit on failure, because we want all tests to run
+# regardless of previous test failures.
+# set -e
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Without `set -e`, the script would exit with the status of its last command,
+# so a failure in an earlier test suite would be lost: the workflow would pass
+# and no issue would be filed. STATUS records any failure, and the script exits
+# with it at the end.
+STATUS=0
+
+# A failed `cd` stops the script, because the tests would run in the wrong
+# directory.
+cd "$REPO_ROOT/samples/client/flutter/restaurant_finder/e2e_test" || exit 1
+# Parallel tests are disabled to avoid conflicts on environment.
+flutter test --concurrency=1 --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" || STATUS=1
+
+cd "$REPO_ROOT/dart/a2ui_agent/e2e_test" || exit 1
+dart test || STATUS=1
+
+exit $STATUS

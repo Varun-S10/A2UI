@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ export class Divider extends Root {
   @property({type: Number})
   accessor thickness: number | null = null;
 
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       :host {
@@ -59,7 +59,7 @@ export class Divider extends Root {
     `,
   ];
 
-  render() {
+  override render() {
     const dividerTheme =
       typeof this.theme?.components?.Divider === 'string'
         ? {[this.theme.components.Divider]: true}

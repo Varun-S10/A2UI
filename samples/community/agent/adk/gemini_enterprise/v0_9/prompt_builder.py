@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,9 +14,7 @@
 
 import os
 
-from a2ui.schema.catalog import CatalogConfig
-from a2ui.schema.common_modifiers import remove_strict_validation
-from a2ui.schema.constants import VERSION_0_9
+from a2ui.schema import CatalogConfig, VERSION_0_9, remove_strict_validation
 from a2ui.schema.manager import A2uiSchemaManager
 
 COMPOSITE_CATALOG_PATH = os.path.join(

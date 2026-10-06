@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,7 @@ import {ComponentHostComponent} from './component-host.component';
 import {By} from '@angular/platform-browser';
 import {A2uiRendererService} from './a2ui-renderer.service';
 import {ComponentBinder} from './component-binder.service';
-import {ComponentModel} from '@a2ui/web_core/v0_9';
+import {ComponentModel, SurfaceComponentsModel} from '@a2ui/web_core/v0_9';
 
 @Component({
   selector: 'test-text',
@@ -43,16 +43,22 @@ describe('SurfaceComponent', () => {
   let mockBinder: any;
 
   beforeEach(async () => {
+    const mockCatalog = {
+      id: 'mock-catalog',
+      components: new Map([['Text', {type: 'Text', component: TestTextComponent}]]),
+    } as any;
+
+    const componentsModel = new SurfaceComponentsModel();
+    componentsModel.addComponent(
+      new ComponentModel('root', 'Text', {text: {value: 'Hello'}}, mockCatalog),
+    );
+
     mockRendererService = {
       surfaceGroup: {
         getSurface: jasmine.createSpy('getSurface').and.returnValue({
-          componentsModel: new Map([
-            ['root', new ComponentModel('root', 'Text', {text: {value: 'Hello'}})],
-          ]),
-          catalog: {
-            id: 'mock-catalog',
-            components: new Map([['Text', {type: 'Text', component: TestTextComponent}]]),
-          },
+          componentsModel,
+          defaultCatalog: mockCatalog,
+          availableCatalogs: new Map(),
         }),
       },
     };

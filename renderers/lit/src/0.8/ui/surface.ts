@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,15 +24,15 @@ import {styleMap} from 'lit/directives/style-map.js';
 @customElement('a2ui-surface')
 export class Surface extends Root {
   @property()
-  accessor surfaceId: Types.SurfaceID | null = null;
+  override accessor surfaceId: Types.SurfaceID | null = null;
 
   @property()
   accessor surface: Types.Surface | null = null;
 
-  @property()
-  accessor processor: A2uiMessageProcessor | null = null;
+  @property({attribute: false})
+  override accessor processor: A2uiMessageProcessor | null = null;
 
-  static styles = [
+  static override styles = [
     css`
       :host {
         display: flex;
@@ -69,7 +69,7 @@ export class Surface extends Root {
   }
 
   @property()
-  accessor enableCustomElements = false;
+  override accessor enableCustomElements = false;
 
   #renderSurface() {
     const styles: Record<string, string> = {};
@@ -126,7 +126,7 @@ export class Surface extends Root {
     ></a2ui-root>`;
   }
 
-  render() {
+  override render() {
     if (!this.surface) {
       return nothing;
     }

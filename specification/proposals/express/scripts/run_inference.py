@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -48,7 +48,6 @@ sys.path.insert(
             "..",
             "..",
             "..",
-            "agent_sdks",
             "python",
             "a2ui_agent",
             "src",
@@ -104,7 +103,7 @@ def run_inference_and_validate(
 
     with open(catalog_path, "r", encoding="utf-8") as f:
         catalog_dict = json.load(f)
-    catalog = Catalog.from_json(catalog_dict, spec_version="0.9.1")
+    catalog = Catalog.from_json(catalog_dict, protocol_version="0.9.1")
 
     # 1. Load the original example JSON to extract target component list
     with open(example_path, "r", encoding="utf-8") as f:
@@ -317,9 +316,10 @@ def main():
             "..",
             "..",
             "..",
-            "v1_0",
+            "..",
             "catalogs",
             "basic",
+            "v1",
             "catalog.json",
         ),
         help="Path to the catalog JSON schema (default: basic catalog).",

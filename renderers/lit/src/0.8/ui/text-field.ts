@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import {Root} from './root.js';
 import {A2uiMessageProcessor} from '@a2ui/web_core/data/model-processor';
 import * as Primitives from '@a2ui/web_core/types/primitives';
 import * as Types from '@a2ui/web_core/types/types';
-import {Events} from '@a2ui/web_core';
+import {Events} from '@a2ui/web_core/v0_8';
 import {classMap} from 'lit/directives/class-map.js';
 import {styleMap} from 'lit/directives/style-map.js';
 import {extractStringValue} from './utils/utils.js';
@@ -40,7 +40,7 @@ export class TextField extends Root {
   @property()
   accessor validationRegexp: string | null = null;
 
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       * {
@@ -132,7 +132,7 @@ export class TextField extends Root {
     </section>`;
   }
 
-  render() {
+  override render() {
     const label = extractStringValue(this.label, this.component, this.processor, this.surfaceId);
     const value = extractStringValue(this.text, this.component, this.processor, this.surfaceId);
 

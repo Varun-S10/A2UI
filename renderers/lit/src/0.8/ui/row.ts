@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ export class Row extends Root {
   @property({reflect: true, type: String})
   accessor distribution: Types.ResolvedRow['distribution'] = 'start';
 
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       * {
@@ -91,7 +91,7 @@ export class Row extends Root {
     `,
   ];
 
-  render() {
+  override render() {
     return html`<section
       class=${classMap(this.theme.components.Row)}
       style=${this.theme.additionalStyles?.Row

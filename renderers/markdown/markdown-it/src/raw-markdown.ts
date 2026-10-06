@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
  */
 
 import markdownit from 'markdown-it';
-import * as Types from '@a2ui/web_core';
+import type {MarkdownRendererTagClassMap} from '@a2ui/web_core';
 
 /**
  * A pre-configured instance of markdown-it to render markdown in A2UI web.
@@ -53,7 +53,7 @@ export class MarkdownItRenderer {
       const originalRule = this.markdownIt.renderer.rules[ruleName];
       this.markdownIt.renderer.rules[ruleName] = (tokens, idx, options, env, self) => {
         const token = tokens[idx];
-        const tagClassMap = env?.tagClassMap as Types.MarkdownRendererTagClassMap | undefined;
+        const tagClassMap = env?.tagClassMap as MarkdownRendererTagClassMap | undefined;
 
         if (tagClassMap) {
           const tokenClasses = tagClassMap[token.tag] ?? [];
@@ -78,7 +78,7 @@ export class MarkdownItRenderer {
    *
    * This method does not perform any sanitization of the outgoing HTML.
    */
-  render(value: string, tagClassMap?: Types.MarkdownRendererTagClassMap) {
+  render(value: string, tagClassMap?: MarkdownRendererTagClassMap) {
     return this.markdownIt.render(value, {tagClassMap});
   }
 }

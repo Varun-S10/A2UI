@@ -1,10 +1,10 @@
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,6 +30,8 @@ from inspect_ai.model._model import sample_model_usage
 from a2ui.inference_formats.direct_json.format import DirectJsonFormat
 from a2ui.schema.catalog import CatalogConfig
 from a2ui.parser.parser import parse_response
+from a2ui.core.processing import MessageProcessor, MessageProcessorOptions
+from a2ui.core.validation import STRICT_VALIDATION
 from .shared.utils import GIT_ROOT
 
 
@@ -94,7 +96,10 @@ def a2ui_scorer(version: str) -> Scorer:
                 )
 
             answer_text = json.dumps(all_messages, indent=2)
-            validator.validate(all_messages)
+            MessageProcessor(
+                [catalog.core_catalog],
+                options=MessageProcessorOptions(validation_config=STRICT_VALIDATION),
+            ).process_messages(all_messages)
             return Score(
                 value=1.0, answer=answer_text, explanation="Valid A2UI payload"
             )

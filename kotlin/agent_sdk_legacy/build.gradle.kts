@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -116,6 +116,10 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.generateGrammarSource {
   arguments = arguments + listOf("-visitor", "-package", "com.google.a2ui.inference_formats.experimental.express.generated")
   outputDirectory = file("${layout.buildDirectory.get()}/generated/sources/antlr/main/com/google/a2ui/inference_formats/experimental/express/generated")
+}
+
+tasks.matching { it.name.startsWith("ktfmt") }.configureEach {
+  mustRunAfter(tasks.withType<AntlrTask>())
 }
 
 

@@ -1,10 +1,10 @@
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -226,7 +226,7 @@ class TestRunnerAndReporter(unittest.TestCase):
     def test_run_evaluation(self, mock_run) -> None:
         mock_run.return_value = MagicMock(returncode=0)
         res = run_evaluation(
-            "atom", "google/gemini-3.5-flash", ["loginForm"], True, "/tmp/logs"
+            "atom", "google/gemini-3.6-flash", ["loginForm"], True, "/tmp/logs"
         )
         self.assertTrue(res)
 
@@ -308,7 +308,7 @@ class TestRunnerAndReporter(unittest.TestCase):
             baseline_data=None,
             git_diff="active diff",
             format_name="atom",
-            model="google/gemini-3.5-flash",
+            model="google/gemini-3.6-flash",
         )
         self.assertIn("# Inference Format Optimization Report", report)
         self.assertIn("Pytest Unit Test Failures", report)
@@ -345,7 +345,7 @@ class TestRunnerAndReporter(unittest.TestCase):
             baseline_data=baseline_data,
             git_diff="",
             format_name="atom",
-            model="google/gemini-3.5-flash",
+            model="google/gemini-3.6-flash",
         )
         self.assertIn("## Summary Table", report)
         self.assertIn("Overall Pass Rate", report)
@@ -449,7 +449,7 @@ class TestRunnerAndReporter(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=0)
         res = run_evaluation(
             format_name="atom",
-            model="google/gemini-3.5-flash",
+            model="google/gemini-3.6-flash",
             prompts=["prompt1", "prompt2"],
             sanity=True,
             log_dir="/tmp/logs",

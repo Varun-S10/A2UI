@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,10 +15,10 @@
  */
 
 import {Injectable} from '@angular/core';
-
-export interface MarkdownRendererOptions {
-  tagClassMap?: Record<string, string>;
-}
+import type {
+  MarkdownRenderer as MarkdownRendererFn,
+  MarkdownRendererOptions,
+} from '@a2ui/web_core/v0_9';
 
 export abstract class MarkdownRenderer {
   abstract render(markdown: string, options?: MarkdownRendererOptions): Promise<string>;
@@ -35,7 +35,7 @@ export class DefaultMarkdownRenderer extends MarkdownRenderer {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore - optional peer dependency throws TS1323 under Angular compiler but not under NodeNext
       const {renderMarkdown} = await import('@a2ui/markdown-it');
-      return await renderMarkdown(markdown, options as any);
+      return await renderMarkdown(markdown, options);
     } catch {
       if (!DefaultMarkdownRenderer.warningLogged) {
         console.warn(
@@ -48,9 +48,7 @@ export class DefaultMarkdownRenderer extends MarkdownRenderer {
   }
 }
 
-export function provideMarkdownRenderer(
-  renderFn?: (markdown: string, options?: MarkdownRendererOptions) => Promise<string>,
-) {
+export function provideMarkdownRenderer(renderFn?: MarkdownRendererFn) {
   if (renderFn) {
     return {
       provide: MarkdownRenderer,

@@ -1,4 +1,4 @@
-# Copyright 2025 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,11 +31,15 @@ on:
       - "requirements-docs.txt"
       - "pyproject.toml"
       - "lychee.toml"
-      - "mkdocs.yml"
+      - "mkdocs.yaml"
       - "docs/**"
   pull_request:
     branches:
       - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   changes:
@@ -47,11 +51,11 @@ jobs:
       docs: ${{ steps.filter.outputs.docs }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check for docs changes
-        uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: filter
         with:
           filters: |
@@ -59,7 +63,7 @@ jobs:
               - ".github/workflows/docs.yml"
               - "requirements-docs.txt"
               - "pyproject.toml"
-              - "mkdocs.yml"
+              - "mkdocs.yaml"
               - "lychee.toml"
               - "docs/**"
               - "**.md"
@@ -68,13 +72,14 @@ jobs:
     needs: changes
     if: github.repository == 'a2ui-project/a2ui' && (github.event_name == 'push' || needs.changes.outputs.docs == 'true')
     runs-on: ubuntu-latest
+    # Requires write access to publish built documentation to gh-pages branch
     permissions:
       contents: write
       actions: read
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
@@ -102,6 +107,13 @@ jobs:
         run: |
           mkdir -p docs/public/specification/
           cp -R specification/* docs/public/specification/
+          # Catalogs live in the top-level catalogs/ directory but are published
+          # under specification/<version>/catalogs/ so that catalog $id URLs
+          # (e.g. https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json)
+          # keep resolving.
+          mkdir -p docs/public/specification/v1_0/catalogs/basic
+          cp catalogs/basic/v1/catalog.json docs/public/specification/v1_0/catalogs/basic/
+          cp -R catalogs/basic/v1/examples docs/public/specification/v1_0/catalogs/basic/
           # Flatten JSON files to version roots to support clean URLs without redirects
           for version in v0_8 v0_9 v0_9_1 v1_0; do
             if [ -d "docs/public/specification/$version/json" ]; then

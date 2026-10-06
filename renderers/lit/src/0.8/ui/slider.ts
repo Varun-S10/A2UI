@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ export class Slider extends Root {
   @property()
   accessor label: Primitives.StringValue | null = null;
 
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       * {
@@ -116,7 +116,7 @@ export class Slider extends Root {
     </section>`;
   }
 
-  render() {
+  override render() {
     if (this.value && typeof this.value === 'object') {
       if ('literalNumber' in this.value && this.value.literalNumber) {
         return this.#renderField(this.value.literalNumber);

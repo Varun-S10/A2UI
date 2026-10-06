@@ -1,12 +1,12 @@
 /* eslint-disable turbo/no-undeclared-env-vars */ // TODO: declare turbo env vars
 /**
- * Copyright 2026 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -31,7 +31,7 @@ const determineModel = () => {
     if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY && process.env.GEMINI_API_KEY) {
       process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GEMINI_API_KEY;
     }
-    return 'google/gemini-2.5-flash';
+    return 'google/gemini-flash-latest';
   }
   if (process.env.OPENAI_API_KEY?.trim()) {
     console.warn(
@@ -42,7 +42,7 @@ const determineModel = () => {
   console.warn(
     '[CopilotKit] No GEMINI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY or OPENAI_API_KEY found',
   );
-  return 'google/gemini-2.5-flash';
+  return 'google/gemini-flash-latest';
 };
 
 const model = determineModel();

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * Copyright 2026 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -97,10 +97,10 @@ export async function main(args, mocks = {}) {
   // Resolve and validate
   const resolvedPackages = packagesToPublish.map(name => {
     const pkg = Object.values(graph)
-      .filter(p => p.dir.includes('/renderers/'))
+      .filter(p => /[/\\](renderers|typescript)[/\\]/.test(p.dir))
       .find(p => p.name === name || p.name.endsWith('/' + name));
     if (!pkg) {
-      throw new Error(`Package "${name}" not found in renderers directory.`);
+      throw new Error(`Package "${name}" not found in renderers or typescript directory.`);
     }
     return pkg.name.replace('@a2ui/', '');
   });

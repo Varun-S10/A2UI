@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -95,7 +95,7 @@ import {ListApi} from '@a2ui/web_core/v0_9/basic_catalog';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ListComponent extends BasicCatalogComponent<typeof ListApi> {
-  readonly listStyle = computed(() => this.props()['listStyle']?.value());
+  readonly listStyle = computed(() => (this.props() as any)['listStyle']?.value());
   readonly direction = computed(() => this.props()['direction']?.value() || 'vertical');
   readonly children = computed(() => this.props()['children'].value());
 

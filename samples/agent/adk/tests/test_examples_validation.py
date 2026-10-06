@@ -1,4 +1,4 @@
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,15 +15,17 @@
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 import pytest
 
-from a2ui.schema.constants import VERSION_0_9
-from a2ui.inference_formats.direct_json.format import DirectJsonFormat
-from a2ui.schema.catalog import CatalogConfig
-from a2ui.basic_catalog.provider import BasicCatalog
-from a2ui.schema.common_modifiers import remove_strict_validation
-from a2ui.schema.catalog_provider import A2uiCatalogProvider
+from a2ui.core.basic_catalog import BasicCatalog
+from a2ui.inference_formats.direct_json import DirectJsonFormat
+from a2ui.schema import (
+    A2uiCatalogProvider,
+    CatalogConfig,
+    VERSION_0_9,
+    remove_strict_validation,
+)
 
 
 ROOT_DIR = Path(__file__).parent.parent.parent.parent.parent  # a2ui root
@@ -39,8 +41,9 @@ SAMPLE_CONFIGS = [
                 catalog_path="inline_catalog_0.9.json",
                 examples_path=f"examples/{VERSION_0_9}",
             ),
-            BasicCatalog.get_config(
-                version=VERSION_0_9,
+            CatalogConfig.from_catalog(
+                "basic",
+                BasicCatalog(VERSION_0_9),
             ),
         ],
         "schema_modifiers": [remove_strict_validation],
@@ -50,8 +53,9 @@ SAMPLE_CONFIGS = [
         "name": "restaurant_finder",
         "path": SAMPLES_DIR / "restaurant_finder",
         "catalogs": [
-            BasicCatalog.get_config(
-                version=VERSION_0_9,
+            CatalogConfig.from_catalog(
+                "basic",
+                BasicCatalog(VERSION_0_9),
                 examples_path="examples/0.9",
             )
         ],
@@ -104,7 +108,7 @@ def test_sample_examples_validation(config):
                     content = json.load(f)
                     try:
                         if do_validate:
-                            catalog.validator.validate(content)
+                            catalog.validate_components(content)
                     except Exception as e:
                         pytest.fail(
                             f"Validation failed for {full_path} in sample"

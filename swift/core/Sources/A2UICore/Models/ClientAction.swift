@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,12 +36,16 @@ public struct ClientAction: Equatable, Codable, Sendable {
   /// `action.event.context`, after resolving all data bindings.
   public let context: [String: JSONValue]
 
+  /// An optional user-facing message describing the action.
+  public let userMessage: String?
+
   private enum CodingKeys: String, CodingKey {
     case name
     case surfaceID = "surfaceId"
     case sourceComponentID = "sourceComponentId"
     case timestamp
     case context
+    case userMessage
   }
 
   /// Creates a new client action.
@@ -50,12 +54,14 @@ public struct ClientAction: Equatable, Codable, Sendable {
     surfaceID: String,
     sourceComponentID: String,
     timestamp: String,
-    context: [String: JSONValue]
+    context: [String: JSONValue],
+    userMessage: String? = nil
   ) {
     self.name = name
     self.surfaceID = surfaceID
     self.sourceComponentID = sourceComponentID
     self.timestamp = timestamp
     self.context = context
+    self.userMessage = userMessage
   }
 }

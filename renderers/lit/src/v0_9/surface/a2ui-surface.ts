@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -103,7 +103,7 @@ export class A2uiSurface extends LitElement {
 
     try {
       const rootContext = new ComponentContext(this.surface, 'root', '/');
-      return html`${renderA2uiNode(rootContext, this.surface.catalog)}`;
+      return html`${renderA2uiNode(rootContext, this.surface.defaultCatalog)}`;
     } catch (e) {
       console.error('Error creating root context:', e);
       return html`<div>Error rendering surface</div>`;

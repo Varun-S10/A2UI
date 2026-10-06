@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ export class Button extends Root {
   @property()
   accessor primary: boolean | null = false;
 
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       :host {
@@ -42,7 +42,7 @@ export class Button extends Root {
     `,
   ];
 
-  render() {
+  override render() {
     return html`<button
       class=${classMap(this.theme.components.Button)}
       style=${this.theme.additionalStyles?.Button

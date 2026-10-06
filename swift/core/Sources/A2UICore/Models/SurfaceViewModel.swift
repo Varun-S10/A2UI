@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import A2UIJSON
 import Combine
 import Foundation
 import OrderedJSON
@@ -20,26 +21,37 @@ import OrderedJSON
 ///
 /// Mirrors `SurfaceViewModel` in the core blueprint and `web_core`.
 /// Composes a ``DataModel``, ``SurfaceComponentsModel``, ``Catalog``,
-/// and an optional theme. This is a pure state container — the
-/// ``MessageProcessor`` handles message parsing, validation, and
-/// mutation of these models.
-///
-/// `SurfaceViewModel` also hosts the tree resolution logic (dynamic value
-/// evaluation, action resolution, child list expansion) that will
-/// eventually move to a dedicated Binder/Context layer (Phase 4).
-public final class SurfaceViewModel: @unchecked Sendable, ObservableObject {
+/// and an optional theme. Tree resolution is delegated to a dedicated
+/// ``NodeResolver`` instance.
+@MainActor
+public final class SurfaceViewModel: ObservableObject {
 
   // MARK: - Properties
 
   public let surfaceID: String
-  public let catalog: Catalog
+  public let catalogs: [String: AnyCatalog]
+  public let defaultCatalogID: String?
+
+  /// The primary default catalog associated with this surface, if available.
+  public var catalog: AnyCatalog {
+    if let defaultCatalogID, let catalog = catalogs[defaultCatalogID] {
+      return catalog
+    }
+    return catalogs.values.first ?? Catalog(id: "empty", components: [])
+  }
   public let theme: [String: JSONValue]?
   public let sendDataModel: Bool
+  public let protocolVersion: String?
 
   public let dataModel: DataModel
   public let componentsModel: SurfaceComponentsModel
+  public let nodeResolver: NodeResolver
 
-  public weak var actionHandler: (any ActionHandling)?
+  public weak var actionHandler: (any ActionHandling)? {
+    didSet {
+      nodeResolver.actionHandler = actionHandler
+    }
+  }
 
   private var cancellables = Set<AnyCancellable>()
 
@@ -51,26 +63,86 @@ public final class SurfaceViewModel: @unchecked Sendable, ObservableObject {
 
   public init(
     surfaceID: String,
-    catalog: Catalog,
+    catalogs: [String: AnyCatalog],
+    defaultCatalogID: String? = nil,
     theme: [String: JSONValue]? = nil,
     actionHandler: (any ActionHandling)? = nil,
-    sendDataModel: Bool = false
+    sendDataModel: Bool = false,
+    protocolVersion: String? = nil
   ) {
     self.surfaceID = surfaceID
-    self.catalog = catalog
+    self.catalogs = catalogs
+    self.defaultCatalogID = defaultCatalogID ?? catalogs.keys.sorted().first
     self.theme = theme
     self.sendDataModel = sendDataModel
     self.actionHandler = actionHandler
+    self.protocolVersion = protocolVersion
     self.dataModel = DataModel()
     self.componentsModel = SurfaceComponentsModel()
+    self.nodeResolver = NodeResolver(
+      surfaceID: surfaceID,
+      catalogs: catalogs,
+      defaultCatalogID: self.defaultCatalogID,
+      componentsModel: self.componentsModel,
+      dataModel: self.dataModel,
+      actionHandler: actionHandler,
+      protocolVersion: protocolVersion
+    )
 
     setUpSubscriptions()
   }
 
+  public convenience init(
+    surfaceID: String,
+    catalogs: [any CatalogProtocol],
+    defaultCatalogID: String? = nil,
+    theme: [String: JSONValue]? = nil,
+    actionHandler: (any ActionHandling)? = nil,
+    sendDataModel: Bool = false,
+    protocolVersion: String? = nil
+  ) {
+    let anyCatalogs = catalogs.map { $0.eraseToAnyCatalog() }
+    let dict = Dictionary(anyCatalogs.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+    self.init(
+      surfaceID: surfaceID,
+      catalogs: dict,
+      defaultCatalogID: defaultCatalogID ?? catalogs.first?.id,
+      theme: theme,
+      actionHandler: actionHandler,
+      sendDataModel: sendDataModel,
+      protocolVersion: protocolVersion
+    )
+  }
+
+  public convenience init(
+    surfaceID: String,
+    catalog: any CatalogProtocol,
+    theme: [String: JSONValue]? = nil,
+    actionHandler: (any ActionHandling)? = nil,
+    sendDataModel: Bool = false,
+    protocolVersion: String? = nil
+  ) {
+    let anyCatalog = catalog.eraseToAnyCatalog()
+    self.init(
+      surfaceID: surfaceID,
+      catalogs: [anyCatalog.id: anyCatalog],
+      defaultCatalogID: anyCatalog.id,
+      theme: theme,
+      actionHandler: actionHandler,
+      sendDataModel: sendDataModel,
+      protocolVersion: protocolVersion
+    )
+  }
+
+  /// Resolves a catalog by ID, falling back to the surface default catalog if nil.
+  public func getCatalog(id: String? = nil) -> AnyCatalog? {
+    nodeResolver.getCatalog(id: id)
+  }
+
   private func setUpSubscriptions() {
-    Publishers.CombineLatest(componentsModel.$components, dataModel.$data)
-      .sink { [weak self] components, data in
-        self?.rebuildTree(components: components, data: data)
+    Publishers.CombineLatest(componentsModel.componentsPublisher, dataModel.dataPublisher)
+      .sink { [weak self] _, _ in
+        self?.rebuildTree()
       }
       .store(in: &cancellables)
   }
@@ -78,487 +150,16 @@ public final class SurfaceViewModel: @unchecked Sendable, ObservableObject {
   // MARK: - Tree Rebuilding
 
   /// Rebuilds the node tree and publishes the new root.
-  private func rebuildTree(components: [String: ComponentModel], data: JSONValue) {
-    let newRoot = resolveNode(id: "root", components: components, data: data)
-
-    // Hopping to Main Thread to update the @Published property safely
-    DispatchQueue.main.async { [weak self] in
-      self?.rootNode = newRoot
-    }
+  private func rebuildTree() {
+    let newRoot = nodeResolver.resolveTree()
+    self.rootNode = newRoot
   }
+}
 
-  // MARK: - Property Classification
+// MARK: - FunctionHandler Conformance
 
-  private enum PropertyType {
-    case dynamicBoolean
-    case dynamicString
-    case dynamicNumber
-    case dynamicValue
-    case action
-    case childList
-    case standard
-  }
-
-  /// Classifies a schema property into an A2UI property type by
-  /// inspecting its raw JSON representation.
-  private func classifySchema(_ schemaJSON: JSONValue) -> PropertyType {
-    // Check for $ref to A2UI common types.
-    // Extract the last path segment (e.g., "DynamicString" from
-    // "...#/$defs/DynamicString") and match exactly to avoid
-    // misidentifying types like "DynamicStringList" as "DynamicString".
-    if let ref = schemaJSON["$ref"]?.stringValue {
-      let typeName =
-        ref
-        .split(separator: "/")
-        .last
-        .map(String.init)
-      switch typeName {
-      case "DynamicBoolean": return .dynamicBoolean
-      case "DynamicString": return .dynamicString
-      case "DynamicNumber": return .dynamicNumber
-      case "DynamicValue": return .dynamicValue
-      case "Action": return .action
-      case "ChildList": return .childList
-      default: break
-      }
-    }
-
-    // Check oneOf subschemas (Dynamic* types use oneOf)
-    if let oneOf = schemaJSON["oneOf"]?.arrayValue {
-      for sub in oneOf {
-        let type = classifySchema(sub)
-        if type != .standard { return type }
-      }
-    }
-
-    // Check anyOf subschemas
-    if let anyOf = schemaJSON["anyOf"]?.arrayValue {
-      for sub in anyOf {
-        let type = classifySchema(sub)
-        if type != .standard { return type }
-      }
-    }
-
-    // Check allOf subschemas (Dynamic* FunctionCall variants use allOf)
-    if let allOf = schemaJSON["allOf"]?.arrayValue {
-      for sub in allOf {
-        let type = classifySchema(sub)
-        if type != .standard { return type }
-      }
-    }
-
-    return .standard
-  }
-
-  // MARK: - Node Resolution
-
-  /// Resolves a component by ID, using the component ID as both
-  /// definition and instance ID.
-  private func resolveNode(
-    id: String,
-    basePath: String? = nil,
-    components: [String: ComponentModel],
-    data: JSONValue
-  ) -> Node? {
-    resolveNode(
-      definitionID: id,
-      instanceID: id,
-      basePath: basePath,
-      visited: [],
-      components: components,
-      data: data
-    )
-  }
-
-  /// Resolves a component definition into a specific instance Node.
-  ///
-  /// - Parameter visited: The set of instance IDs already being
-  ///   resolved in the current traversal. Prevents infinite recursion
-  ///   on cyclic component references while allowing legitimate
-  ///   data-driven recursion (e.g. a "card" component that renders
-  ///   nested "card" children from array data).
-  private func resolveNode(
-    definitionID: String,
-    instanceID: String,
-    basePath: String?,
-    visited: Set<String>,
-    components: [String: ComponentModel],
-    data: JSONValue
-  ) -> Node? {
-    guard !visited.contains(instanceID) else {
-      // Cycle detected: this instance is already being resolved
-      // higher up the call stack.
-      return nil
-    }
-
-    guard let component = components[definitionID] else {
-      return nil
-    }
-
-    let type = component.type
-    var visited = visited
-    visited.insert(instanceID)
-
-    // Get the schema for this component type to classify properties
-    let schema = catalog.components[type]?.schema
-    let schemaJSON = schema?.jsonValue ?? .object([:])
-    let propertiesSchema = schemaJSON["properties"]?.objectValue
-
-    var resolvedProperties: [String: any Resolved] = [:]
-
-    for (key, val) in component.properties {
-      let propSchema = propertiesSchema?[key] ?? .boolean(true)
-      let propType = classifySchema(propSchema)
-
-      if let resolvedVal = resolveProperty(
-        value: val,
-        type: propType,
-        basePath: basePath,
-        componentID: instanceID,
-        propertyKey: key,
-        visited: visited,
-        components: components,
-        data: data
-      ) {
-        resolvedProperties[key] = resolvedVal
-      }
-    }
-
-    return Node(id: instanceID, type: type, properties: resolvedProperties)
-  }
-
-  private func resolveProperty(
-    value: JSONValue,
-    type: PropertyType,
-    basePath: String?,
-    componentID: String,
-    propertyKey: String,
-    visited: Set<String>,
-    components: [String: ComponentModel],
-    data: JSONValue
-  ) -> (any Resolved)? {
-    switch type {
-    case .dynamicBoolean:
-      return resolveDynamicBoolean(value, basePath: basePath, data: data)
-    case .dynamicString:
-      return resolveDynamicString(value, basePath: basePath, data: data)
-    case .dynamicNumber:
-      return resolveDynamicNumber(value, basePath: basePath, data: data)
-    case .dynamicValue:
-      return resolveDynamicValueBinding(value, basePath: basePath, data: data)
-    case .action:
-      return resolveAction(value, basePath: basePath, componentID: componentID, data: data)
-    case .childList:
-      return resolveChildList(
-        value,
-        basePath: basePath,
-        componentID: componentID,
-        propertyKey: propertyKey,
-        visited: visited,
-        components: components,
-        data: data
-      )
-    case .standard:
-      return value
-    }
-  }
-
-  // MARK: - Dynamic Value Evaluation
-
-  /// Resolves a dynamic value to its current literal `JSONValue`.
-  private func evaluateDynamicValue(
-    _ value: JSONValue,
-    basePath: String?,
-    data: JSONValue
-  ) -> JSONValue {
-    switch value {
-    case .object(let dict):
-      if let pathStr = dict["path"]?.stringValue {
-        let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-        return data[absPath] ?? .null
-      } else if let callName = dict["call"]?.stringValue {
-        guard let function = catalog.functions[callName] else {
-          return .null
-        }
-        var resolvedArgs: [String: JSONValue] = [:]
-        if let argsObj = dict["args"]?.dictionaryValue {
-          for (argKey, argVal) in argsObj {
-            resolvedArgs[argKey] = evaluateDynamicValue(argVal, basePath: basePath, data: data)
-          }
-        }
-        do {
-          return try function.evaluate(arguments: resolvedArgs)
-        } catch {
-          return .null
-        }
-      }
-      return value
-    default:
-      return value
-    }
-  }
-
-  // MARK: - Dynamic Type-Specific Resolvers
-
-  private func resolveDynamicBoolean(
-    _ value: JSONValue,
-    basePath: String?,
-    data: JSONValue
-  ) -> DataBinding<Bool> {
-    if let dict = value.dictionaryValue, let pathStr = dict["path"]?.stringValue {
-      let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      return DataBinding<Bool>(
-        identity: .path(absPath),
-        get: { [weak self] in
-          self?.dataModel.get(absPath)?.boolValue ?? false
-        },
-        set: { [weak self] newValue in
-          self?.dataModel.set(absPath, value: .boolean(newValue))
-        }
-      )
-    }
-    return DataBinding<Bool>(
-      identity: .literal(value),
-      get: { [weak self] in
-        guard let self else { return value.boolValue ?? false }
-        return self.evaluateDynamicValue(value, basePath: basePath, data: self.dataModel.data)
-          .boolValue ?? false
-      },
-      set: { _ in }
-    )
-  }
-
-  private func resolveDynamicString(
-    _ value: JSONValue,
-    basePath: String?,
-    data: JSONValue
-  ) -> DataBinding<String> {
-    if let dict = value.dictionaryValue, let pathStr = dict["path"]?.stringValue {
-      let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      return DataBinding<String>(
-        identity: .path(absPath),
-        get: { [weak self] in
-          self?.dataModel.get(absPath)?.stringValue ?? ""
-        },
-        set: { [weak self] newValue in
-          self?.dataModel.set(absPath, value: .string(newValue))
-        }
-      )
-    }
-    return DataBinding<String>(
-      identity: .literal(value),
-      get: { [weak self] in
-        guard let self else { return value.stringValue ?? "" }
-        return self.evaluateDynamicValue(value, basePath: basePath, data: self.dataModel.data)
-          .stringValue ?? ""
-      },
-      set: { _ in }
-    )
-  }
-
-  private func resolveDynamicNumber(
-    _ value: JSONValue,
-    basePath: String?,
-    data: JSONValue
-  ) -> DataBinding<Double> {
-    if let dict = value.dictionaryValue, let pathStr = dict["path"]?.stringValue {
-      let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      return DataBinding<Double>(
-        identity: .path(absPath),
-        get: { [weak self] in
-          self?.dataModel.get(absPath)?.doubleValue ?? 0.0
-        },
-        set: { [weak self] newValue in
-          self?.dataModel.set(absPath, value: .number(newValue))
-        }
-      )
-    }
-    return DataBinding<Double>(
-      identity: .literal(value),
-      get: { [weak self] in
-        guard let self else { return value.doubleValue ?? 0.0 }
-        return self.evaluateDynamicValue(value, basePath: basePath, data: self.dataModel.data)
-          .doubleValue ?? 0.0
-      },
-      set: { _ in }
-    )
-  }
-
-  private func resolveDynamicValueBinding(
-    _ value: JSONValue,
-    basePath: String?,
-    data: JSONValue
-  ) -> DataBinding<JSONValue> {
-    if let dict = value.dictionaryValue, let pathStr = dict["path"]?.stringValue {
-      let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      return DataBinding<JSONValue>(
-        identity: .path(absPath),
-        get: { [weak self] in
-          self?.dataModel.get(absPath) ?? .null
-        },
-        set: { [weak self] newValue in
-          self?.dataModel.set(absPath, value: newValue)
-        }
-      )
-    }
-    return DataBinding<JSONValue>(
-      identity: .literal(value),
-      get: { [weak self] in
-        guard let self else { return value }
-        return self.evaluateDynamicValue(value, basePath: basePath, data: self.dataModel.data)
-      },
-      set: { _ in }
-    )
-  }
-
-  // MARK: - Action Resolution
-
-  private func resolveAction(
-    _ value: JSONValue,
-    basePath: String?,
-    componentID: String,
-    data: JSONValue
-  ) -> ResolvedAction? {
-    guard let dict = value.dictionaryValue else { return nil }
-
-    if let eventObj = dict["event"]?.dictionaryValue,
-      let name = eventObj["name"]?.stringValue
-    {
-      let contextDict = eventObj["context"]?.dictionaryValue
-      let unresolvedIdentity = ResolvedAction.Identity.event(
-        name: name,
-        context: contextDict
-      )
-
-      return ResolvedAction(
-        identity: unresolvedIdentity,
-        trigger: { [weak self] in
-          guard let self else { return }
-          var resolvedContext: [String: JSONValue] = [:]
-          if let contextDict {
-            for (key, val) in contextDict {
-              resolvedContext[key] = self.evaluateDynamicValue(
-                val,
-                basePath: basePath,
-                data: self.dataModel.data
-              )
-            }
-          }
-
-          let triggerAction = ResolvedAction(
-            identity: .event(name: name, context: resolvedContext),
-            trigger: {}
-          )
-
-          self.actionHandler?.handle(action: triggerAction, from: self.surfaceID)
-        }
-      )
-    } else if let funcCallObj = dict["functionCall"]?.dictionaryValue,
-      let call = funcCallObj["call"]?.stringValue
-    {
-      let argsDict = funcCallObj["args"]?.dictionaryValue
-      let unresolvedIdentity = ResolvedAction.Identity.function(
-        call: call,
-        args: argsDict
-      )
-
-      return ResolvedAction(
-        identity: unresolvedIdentity,
-        trigger: { [weak self] in
-          guard let self else { return }
-          var resolvedArgs: [String: JSONValue] = [:]
-          if let argsDict {
-            for (argKey, argVal) in argsDict {
-              resolvedArgs[argKey] = self.evaluateDynamicValue(
-                argVal,
-                basePath: basePath,
-                data: self.dataModel.data
-              )
-            }
-          }
-
-          let triggerAction = ResolvedAction(
-            identity: .function(call: call, args: resolvedArgs),
-            trigger: {}
-          )
-
-          self.actionHandler?.handle(action: triggerAction, from: self.surfaceID)
-        }
-      )
-    }
-
-    return nil
-  }
-
-  // MARK: - Child List Resolution
-
-  private func resolveChildList(
-    _ value: JSONValue,
-    basePath: String?,
-    componentID: String,
-    propertyKey: String,
-    visited: Set<String>,
-    components: [String: ComponentModel],
-    data: JSONValue
-  ) -> [Node]? {
-    switch value {
-    case .array(let arr):
-      var resolvedNodes: [Node] = []
-      for item in arr {
-        guard let childID = item.stringValue else { continue }
-        if let childNode = resolveNode(
-          definitionID: childID,
-          instanceID: childID,
-          basePath: basePath,
-          visited: visited,
-          components: components,
-          data: data
-        ) {
-          resolvedNodes.append(childNode)
-        }
-      }
-      return resolvedNodes
-
-    case .object(let dict):
-      guard
-        let templateID =
-          (dict["componentId"]?.stringValue
-            ?? dict["template"]?.stringValue),
-        let pathStr = (dict["path"]?.stringValue ?? dict["data"]?.stringValue)
-      else {
-        return nil
-      }
-
-      let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-
-      guard let dataListVal = data[absPath],
-        let dataItems = dataListVal.arrayValue
-      else {
-        return []
-      }
-
-      var expandedNodes: [Node] = []
-
-      for (index, _) in dataItems.enumerated() {
-        let itemID = "\(templateID)_\(index)"
-        let itemBasePath = "\(absPath)/\(index)"
-
-        if let childNode = resolveNode(
-          definitionID: templateID,
-          instanceID: itemID,
-          basePath: itemBasePath,
-          visited: visited,
-          components: components,
-          data: data
-        ) {
-          expandedNodes.append(childNode)
-        }
-      }
-
-      return expandedNodes
-
-    default:
-      return nil
-    }
+extension SurfaceViewModel: FunctionHandler {
+  public func function(named name: String, catalogID: String?) -> (any FunctionImplementation)? {
+    nodeResolver.function(named: name, catalogID: catalogID)
   }
 }

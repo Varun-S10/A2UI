@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ export class List extends Root {
   @property({reflect: true, type: String})
   accessor direction: 'vertical' | 'horizontal' = 'vertical';
 
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       * {
@@ -59,7 +59,7 @@ export class List extends Root {
     `,
   ];
 
-  render() {
+  override render() {
     return html`<section
       class=${classMap(this.theme.components.List)}
       style=${this.theme.additionalStyles?.List

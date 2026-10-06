@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -119,6 +119,31 @@ struct ClientToServerMessageTests {
     let json = try #require(
       "{\"version\": \"v0.9.1\"}".data(using: .utf8)
     )
+    #expect(throws: DecodingError.self) {
+      try JSONDecoder().decode(ClientToServerMessage.self, from: json)
+    }
+  }
+
+  @Test func decodeRejectsBothActionAndError() throws {
+    let json = try #require(
+      """
+      {
+        "version": "v0.9.1",
+        "action": {
+          "name": "submit",
+          "surfaceId": "main",
+          "sourceComponentId": "btn_submit",
+          "timestamp": "2023-10-27T10:00:00Z",
+          "context": {}
+        },
+        "error": {
+          "code": "VALIDATION_FAILED",
+          "surfaceId": "main",
+          "path": "/components/0",
+          "message": "Invalid input"
+        }
+      }
+      """.data(using: .utf8))
     #expect(throws: DecodingError.self) {
       try JSONDecoder().decode(ClientToServerMessage.self, from: json)
     }

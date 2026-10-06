@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,18 +16,18 @@
 
 import {Component, ChangeDetectionStrategy} from '@angular/core';
 import {CommonModule} from '@angular/common';
-import {CatalogComponent} from '@a2ui/angular/v0_9';
+import {CatalogComponent, createComponentImplementation} from '@a2ui/angular/v0_9';
 import z from 'zod';
-import {ComponentApi} from '@a2ui/web_core/v0_9';
+import {ComponentApi, DynamicStringSchema, DynamicNumberSchema} from '@a2ui/web_core/v0_9';
 
 const customSliderApi = {
   name: 'CustomSlider',
   schema: z.object({
-    label: z.string().optional(),
-    value: z.number().optional(),
-    min: z.number().optional(),
-    max: z.number().optional(),
-  }) as any,
+    label: DynamicStringSchema.optional(),
+    value: DynamicNumberSchema.optional(),
+    min: DynamicNumberSchema.optional(),
+    max: DynamicNumberSchema.optional(),
+  }),
 } satisfies ComponentApi;
 
 /**
@@ -71,7 +71,7 @@ export class CustomSliderComponent extends CatalogComponent<typeof customSliderA
   }
 }
 
-export const customSliderComponentDeclaration = {
-  ...customSliderApi,
-  component: CustomSliderComponent,
-};
+export const customSliderComponentDeclaration = createComponentImplementation(
+  customSliderApi,
+  CustomSliderComponent,
+);

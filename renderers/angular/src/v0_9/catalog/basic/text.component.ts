@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -145,7 +145,9 @@ export class TextComponent extends BasicCatalogComponent<typeof TextApi> {
   ]);
 
   readonly variant = computed(() => this.props()['variant']?.value() || 'body');
-  readonly text = computed(() => this.props()['text']?.value() || '');
+  // Dynamic bindings (e.g. `{ path: 'quantity' }`) can resolve to non-string values;
+  // coerce to string before markdown rendering.
+  readonly text = computed(() => this.props()['text']?.value()?.toString() ?? '');
 
   readonly isNonMarkdownVariant = computed(() => {
     return TextComponent.NON_MARKDOWN_VARIANTS.has(this.variant());

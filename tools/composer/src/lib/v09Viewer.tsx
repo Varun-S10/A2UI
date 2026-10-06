@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,7 +26,8 @@
 'use client';
 
 import {useMemo} from 'react';
-import {A2uiSurface, basicCatalog} from '@a2ui/react/v0_9';
+import {A2uiSurface, type ReactCatalogComponent} from '@a2ui/react/v0_9';
+import {basicCatalog} from '@a2ui/web_core/v0_9/basic_catalog';
 import {MessageProcessor} from '@a2ui/web_core/v0_9';
 
 const CATALOG_ID = 'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json';
@@ -47,7 +48,7 @@ export interface V09ViewerProps {
 
 export function V09Viewer({root, components, data = {}, onAction}: V09ViewerProps) {
   const surface = useMemo(() => {
-    const processor = new MessageProcessor(
+    const processor = new MessageProcessor<ReactCatalogComponent>(
       [basicCatalog],
       onAction ? (action: unknown) => onAction(action) : undefined,
     );

@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {Component, input} from '@angular/core';
 import {By} from '@angular/platform-browser';
 import {ModalComponent} from './modal.component';
-import {ComponentModel} from '@a2ui/web_core/v0_9';
+import {ComponentModel, SurfaceComponentsModel} from '@a2ui/web_core/v0_9';
 import {A2uiRendererService} from '../../core/a2ui-renderer.service';
 import {ComponentBinder} from '../../core/component-binder.service';
 import {setComponentProps, createBoundProperty, ComponentToProps} from '@a2ui/angular/testing';
@@ -42,20 +42,25 @@ describe('ModalComponent', () => {
   let defaultProps: ComponentToProps<ModalComponent>;
 
   beforeEach(async () => {
+    const mockCatalog = {
+      id: 'mock-catalog',
+      components: new Map([['Text', {type: 'Text', component: DummyTextComponent}]]),
+    } as any;
+
+    const componentsModel = new SurfaceComponentsModel();
+    componentsModel.addComponent(
+      new ComponentModel('trigger-btn', 'Text', {text: {value: 'Open'}}, mockCatalog),
+    );
+    componentsModel.addComponent(
+      new ComponentModel('modal-content', 'Text', {text: {value: 'Modal'}}, mockCatalog),
+    );
+
     const mockRendererService = {
       surfaceGroup: {
         getSurface: jasmine.createSpy('getSurface').and.returnValue({
-          componentsModel: new Map([
-            ['trigger-btn', new ComponentModel('trigger-btn', 'Text', {text: {value: 'Open'}})],
-            [
-              'modal-content',
-              new ComponentModel('modal-content', 'Text', {text: {value: 'Modal'}}),
-            ],
-          ]),
-          catalog: {
-            id: 'mock-catalog',
-            components: new Map([['Text', {type: 'Text', component: DummyTextComponent}]]),
-          },
+          componentsModel,
+          defaultCatalog: mockCatalog,
+          availableCatalogs: new Map(),
         }),
       },
     };

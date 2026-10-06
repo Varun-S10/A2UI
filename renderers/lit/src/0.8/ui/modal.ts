@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import {ref} from 'lit/directives/ref.js';
 
 @customElement('a2ui-modal')
 export class Modal extends Root {
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       * {
@@ -75,7 +75,7 @@ export class Modal extends Root {
     this.#showModal = false;
   }
 
-  render() {
+  override render() {
     if (!this.#showModal) {
       return html`<section
         @click=${() => {

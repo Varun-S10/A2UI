@@ -1,10 +1,10 @@
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -46,6 +46,22 @@ DATASETS_DIR = GIT_ROOT / "eval" / "datasets"
 def _version_to_dir_name(version: str) -> str:
     """Converts a version string (e.g., '0.9.1') to a directory name (e.g., 'v0_9_1')."""
     return "v" + version.replace(".", "_")
+
+
+# Catalogs that moved from `specification/<version>/catalogs/` to the top-level
+# `catalogs/` directory. Dataset entries (including the encrypted ones) may still
+# use the old location, so both spellings resolve to the same file.
+_MOVED_CATALOG_PREFIXES = {
+    "specification/v1_0/catalogs/basic/": "catalogs/basic/v1/",
+}
+
+
+def _resolve_catalog_path(catalog_path: str) -> str:
+    """Maps legacy catalog locations to their current repository path."""
+    for old_prefix, new_prefix in _MOVED_CATALOG_PREFIXES.items():
+        if catalog_path.startswith(old_prefix):
+            return new_prefix + catalog_path[len(old_prefix) :]
+    return catalog_path
 
 
 def _parse_tool_calls(
@@ -194,6 +210,7 @@ def load_a2ui_dataset(
                 catalog_path = catalog_path.replace(
                     "{version}", _version_to_dir_name(version)
                 )
+            catalog_path = _resolve_catalog_path(catalog_path)
 
             default_role = (
                 DEFAULT_ROLE_DESCRIPTION

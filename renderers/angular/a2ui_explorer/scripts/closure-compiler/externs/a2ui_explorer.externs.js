@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -93,3 +93,45 @@ ExampleDataModelExterns.prototype.responseMessage;
 ExampleDataModelExterns.prototype.isValid;
 /** @type {?|undefined} */
 ExampleDataModelExterns.prototype.validationErrors;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.dataModel;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.inlineCatalogs;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.data;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.quantity;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.agree;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.symbol;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.price;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.marketCap;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.logs;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.assets;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.items;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.now;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.formData;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.phone;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.zip;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.message;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.sliderValue;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.sliderLabel;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.status;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.actionResult;
+/** @type {?|undefined} */
+ExampleDataModelExterns.prototype.currentSlider;

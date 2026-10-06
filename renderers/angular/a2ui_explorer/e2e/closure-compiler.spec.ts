@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -193,5 +193,27 @@ test('renders Incremental example without errors in minified production build', 
   await expect(canvas).toContainText('The Golden Fork');
   await expect(canvas).toContainText("Ocean's Bounty");
   await expect(canvas).toContainText('Pizzeria Roma');
+  await expectNoErrors(page, errors);
+});
+
+test('renders native Angular container grid with native and universal children in minified production build', async ({
+  page,
+}) => {
+  const errors = setupErrorMonitoring(page);
+
+  await page.goto('/');
+  await expectNoErrors(page, errors);
+
+  // Click on 'Native Grid' example in sidebar
+  await page
+    .locator('.sidebar .example-list li')
+    .filter({has: page.locator('.ex-name', {hasText: /Native Grid/i})})
+    .click();
+
+  const canvas = page.locator('.rendered-content');
+  await expect(canvas).toContainText('Native Container Component Showcase');
+  await expect(canvas).toContainText('Master Volume (Native)');
+  await expect(canvas).toContainText('Universal Web Component: Text & Card');
+  await expect(canvas).toContainText('Universal Button Action');
   await expectNoErrors(page, errors);
 });

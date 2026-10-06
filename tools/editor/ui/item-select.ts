@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ export class ItemSelect extends LitElement {
     return this.#values[this.#selected]?.id ?? '';
   }
 
-  static styles = [
+  static override styles = [
     unsafeCSS(v0_8.Styles.structuralStyles),
     css`
       :host {
@@ -286,7 +286,7 @@ export class ItemSelect extends LitElement {
     this.requestUpdate();
   }
 
-  protected firstUpdated(): void {
+  protected override firstUpdated(): void {
     if (!this.autoActivate) {
       return;
     }
@@ -300,7 +300,7 @@ export class ItemSelect extends LitElement {
     });
   }
 
-  render() {
+  override render() {
     const idx = this.freezeValue !== -1 ? this.freezeValue : this.#selected;
     const renderedValue = this.#values[idx] ?? {
       title: 'No items available',

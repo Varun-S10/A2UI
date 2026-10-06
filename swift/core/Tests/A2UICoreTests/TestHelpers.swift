@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import OrderedJSON
 import Testing
 
 /// Helper to create a catalog with a simple text component schema for testing.
-func makeMessageProcessorTestCatalog() throws -> Catalog {
+func makeMessageProcessorTestCatalog() throws -> AnyCatalog {
   let textSchema = try Schema(
     instance: """
       {
@@ -37,7 +37,7 @@ func makeMessageProcessorTestCatalog() throws -> Catalog {
   )
   return Catalog(
     id: "default",
-    components: [ComponentAPI(name: "text", schema: textSchema)]
+    components: [AnyComponentAPI(name: "text", schema: textSchema)]
   )
 }
 

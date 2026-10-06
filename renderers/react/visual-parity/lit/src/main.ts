@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,7 @@ import {getTheme, themeNames, type ThemeName} from '../../fixtures/themes';
 // Key insight: @lit/context doesn't propagate through <slot>, so we must
 // provide the theme directly on a component that renders a2ui-surface as a child
 class ThemedA2UISurface extends LitElement {
-  static properties = {
+  static override properties = {
     theme: {attribute: false},
     surfaceId: {attribute: false},
     surface: {attribute: false},
@@ -54,13 +54,13 @@ class ThemedA2UISurface extends LitElement {
     this.surfaceId = '';
   }
 
-  willUpdate(changedProperties: Map<PropertyKey, unknown>) {
+  override willUpdate(changedProperties: Map<PropertyKey, unknown>) {
     if (changedProperties.has('theme')) {
       this._themeProvider.setValue(this.theme);
     }
   }
 
-  render() {
+  override render() {
     return html`<a2ui-surface
       .surfaceId=${this.surfaceId}
       .surface=${this.surface}

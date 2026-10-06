@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,26 +15,20 @@
  */
 
 import React, {useRef, useSyncExternalStore, useCallback, memo, useEffect} from 'react';
-import {type ComponentContext, GenericBinder} from '@a2ui/web_core/v0_9';
-import type {
-  ComponentApi,
-  InferredComponentApiSchemaType,
-  ResolveA2uiProps,
+import {
+  type ComponentApi,
+  type ComponentContext,
+  GenericBinder,
+  type InferredComponentApiSchemaType,
+  type ResolveA2uiProps,
 } from '@a2ui/web_core/v0_9';
-
-export interface ReactComponentImplementation extends ComponentApi {
-  /** The framework-specific rendering wrapper. */
-  render: React.FC<{
-    context: ComponentContext;
-    buildChild: (id: string, basePath?: string) => React.ReactNode;
-  }>;
-}
-
-export type ReactA2uiComponentProps<T> = {
-  props: T;
-  buildChild: (id: string, basePath?: string) => React.ReactNode;
-  context: ComponentContext;
-};
+import {useNodeView} from './node-view';
+import type {
+  NodeViewProps,
+  ReactA2uiComponentProps,
+  ReactComponentImplementation,
+  ReactRenderProps,
+} from './react_component_implementation';
 
 // --- Component Factories ---
 
@@ -51,20 +45,21 @@ export function createComponentImplementation<Api extends ComponentApi>(
 
   const MemoizedRender = memo(RenderComponent, (prev, next) => {
     if (prev.props !== next.props) return false;
+    // The child index is rebuilt when a child arrives, leaves, or is
+    // replaced; binder props don't change with it, so the builder's identity
+    // is the only signal.
+    if (prev.buildChild !== next.buildChild) return false;
     if (prev.context.componentModel.id !== next.context.componentModel.id) return false;
     if (prev.context.dataContext.path !== next.context.dataContext.path) return false;
     return true;
   });
 
-  const ReactWrapper: React.FC<{
-    context: ComponentContext;
-    buildChild: (id: string, basePath?: string) => React.ReactNode;
-  }> = ({context, buildChild}) => {
+  const ReactWrapper: React.FC<ReactRenderProps> = ({context, buildChild}) => {
     const bindingRef = useRef<GenericBinder<Props> | null>(null);
 
-    // Create or recreate the binder if the context object changes.
-    // DeferredChild memoizes `context`, so reference changes strictly correspond
-    // to ComponentModel updates (like type changes) or Base Path adjustments.
+    // Create or recreate the binder if the context object changes. Callers
+    // memoize `context`, so a new reference means the component's model or its
+    // data path changed.
     if (!bindingRef.current) {
       bindingRef.current = new GenericBinder<Props>(context, api.schema);
     } else if ((bindingRef.current as unknown as {context: ComponentContext}).context !== context) {
@@ -94,10 +89,19 @@ export function createComponentImplementation<Api extends ComponentApi>(
     );
   };
 
+  const NodeView: React.FC<NodeViewProps> = ({node, buildChild}) => {
+    const {viewProps, context, viewBuildChild} = useNodeView(node, buildChild);
+    return (
+      <MemoizedRender props={viewProps as Props} buildChild={viewBuildChild} context={context} />
+    );
+  };
+  NodeView.displayName = `${api.name}.view`;
+
   return {
     name: api.name,
     schema: api.schema,
     render: ReactWrapper,
+    view: NodeView,
   };
 }
 
@@ -106,14 +110,21 @@ export function createComponentImplementation<Api extends ComponentApi>(
  */
 export function createBinderlessComponentImplementation(
   api: ComponentApi,
-  RenderComponent: React.FC<{
-    context: ComponentContext;
-    buildChild: (id: string, basePath?: string) => React.ReactNode;
-  }>,
+  RenderComponent: React.FC<ReactRenderProps>,
 ): ReactComponentImplementation {
+  const NodeView: React.FC<NodeViewProps> = ({node, buildChild}) => {
+    // The conversion's only role here is filling the child index; the
+    // component binds its own values from the context, so its child ids are
+    // raw component ids, not view tokens.
+    const {context, rawBuildChild} = useNodeView(node, buildChild);
+    return <RenderComponent context={context} buildChild={rawBuildChild} />;
+  };
+  NodeView.displayName = `${api.name}.view`;
+
   return {
     name: api.name,
     schema: api.schema,
     render: RenderComponent,
+    view: NodeView,
   };
 }

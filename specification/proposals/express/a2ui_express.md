@@ -135,6 +135,16 @@ Form validation checks are defined using the `?` prefix. If a component expects 
 
 To execute standalone lifecycle operations or invoke client-side functions directly from the server, A2UI Express supports standalone function call lines without variable assignments:
 
+#### Surface targeting
+
+To specify or target a user interface surface, output `surface(surfaceId)` or `surface(surfaceId, catalogId)` before component variable definitions:
+
+```
+surface("dashboard-surface-1")
+```
+
+The compiler automatically emits `createSurface` or `updateComponents` protocol envelopes depending on whether the surface is being instantiated or updated in the active session. If `surface()` is omitted, the compiler falls back to the default surface identifier (`"default_surface"`).
+
 #### Deleting a surface
 
 When the compiler encounters the standalone `deleteSurface` command, it produces a standard `deleteSurface` lifecycle message:
@@ -154,7 +164,7 @@ deleteSurface("dashboard-surface-1")
 
 #### Executing client-side functions (RPC)
 
-When the compiler encounters any other standalone function call, it resolves the arguments against catalog definitions and produces a standard `callFunction` RPC message with an auto-generated `functionCallId`:
+When the compiler encounters any other standalone function call, it resolves the arguments against catalog definitions and produces a `callRendererFunction` message with an auto-generated `functionCallId`:
 
 ```
 openUrl("https://example.com")
@@ -163,15 +173,20 @@ openUrl("https://example.com")
 ```json
 {
   "version": "v1.0",
-  "functionCallId": "call_1",
-  "callFunction": {
-    "call": "openUrl",
-    "args": {
-      "url": "https://example.com"
+  "callRendererFunction": {
+    "functionCallId": "call_1",
+    "callFunction": {
+      "catalogId": "https://a2ui.org/catalog.json",
+      "call": "openUrl",
+      "args": {
+        "url": "https://example.com"
+      }
     }
   }
 }
 ```
+
+The `functionCallId` and the `callFunction` both sit inside `callRendererFunction`, and `catalogId` is required on the call. See `CallRendererFunctionMessage` in `specification/v1_0/json/agent_to_renderer.json` for the normative definition.
 
 ## Compilation pipeline
 

@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ struct NodeTests {
 
   // MARK: - Initialization
 
-  @Test func nodeInitializesWithIdTypeAndProperties() {
+  @Test func nodeInitializesWithIDTypeAndProperties() {
     let node = Node(
       id: "btn1",
       type: "button",
@@ -29,7 +29,18 @@ struct NodeTests {
     )
     #expect(node.id == "btn1")
     #expect(node.type == "button")
+    #expect(node.catalogID == nil)
     #expect(node.properties["label"] as? String == "Click Me")
+  }
+
+  @Test func nodeStoresCatalogID() {
+    let node = Node(
+      id: "btn1",
+      type: "button",
+      catalogID: "catA",
+      properties: [:]
+    )
+    #expect(node.catalogID == "catA")
   }
 
   // MARK: - allChildNodes
@@ -96,15 +107,72 @@ struct NodeTests {
     #expect(node.allChildNodes.isEmpty)
   }
 
+  @Test func allChildNodesCollectsFromNestedStructures() {
+    let tabChild1 = Node(id: "tab1-col", type: "column", properties: [:])
+    let tabChild2 = Node(id: "tab2-col", type: "column", properties: [:])
+    let tab1 = ResolvedDictionary(["title": "Tab 1", "child": tabChild1])
+    let tab2 = ResolvedDictionary(["title": "Tab 2", "child": tabChild2])
+    let tabs = Node(
+      id: "tabs1",
+      type: "Tabs",
+      properties: ["tabs": ResolvedArray([tab1, tab2])]
+    )
+    #expect(tabs.allChildNodes.count == 2)
+    let ids = Set(tabs.allChildNodes.map(\.id))
+    #expect(ids == ["tab1-col", "tab2-col"])
+  }
+
+  // MARK: - Validation Checks
+
+  @Test func checksCollectsFromStandardChecksProperty() {
+    let check1 = ResolvedCheck(
+      condition: DataBinding<Bool>(identity: .literal(.boolean(true)), value: true),
+      message: "Pass"
+    )
+    let check2 = ResolvedCheck(
+      condition: DataBinding<Bool>(identity: .literal(.boolean(false)), value: false),
+      message: "Fail"
+    )
+    let node = Node(
+      id: "input1",
+      type: "textField",
+      properties: ["checks": [check1, check2]]
+    )
+    #expect(node.checks.count == 2)
+    #expect(!node.isValid)
+    #expect(node.validationErrors == ["Fail"])
+  }
+
+  @Test func checksCollectsFromCustomNamedAndSingleCheckProperties() {
+    let check1 = ResolvedCheck(
+      condition: DataBinding<Bool>(identity: .literal(.boolean(true)), value: true),
+      message: "Custom check pass"
+    )
+    let check2 = ResolvedCheck(
+      condition: DataBinding<Bool>(identity: .literal(.boolean(false)), value: false),
+      message: "Single rule fail"
+    )
+    let node = Node(
+      id: "input2",
+      type: "customInput",
+      properties: [
+        "rules": [check1],
+        "validation": check2,
+      ]
+    )
+    #expect(node.checks.count == 2)
+    #expect(!node.isValid)
+    #expect(node.validationErrors == ["Single rule fail"])
+  }
   // MARK: - Equality
 
-  @Test func nodesEqualByIdTypeAndProperties() {
+  @Test func nodesEqualByIDTypeAndProperties() {
     let a = Node(id: "btn1", type: "button", properties: ["label": "OK"])
     let b = Node(id: "btn1", type: "button", properties: ["label": "OK"])
     #expect(a == b)
   }
 
-  @Test func nodesNotEqualByDifferentId() {
+  @Test func nodesNotEqualByDifferentID() {
     let a = Node(id: "btn1", type: "button", properties: [:])
     let b = Node(id: "btn2", type: "button", properties: [:])
     #expect(a != b)
@@ -113,6 +181,12 @@ struct NodeTests {
   @Test func nodesNotEqualByDifferentType() {
     let a = Node(id: "btn1", type: "button", properties: [:])
     let b = Node(id: "btn1", type: "text", properties: [:])
+    #expect(a != b)
+  }
+
+  @Test func nodesNotEqualByDifferentCatalogID() {
+    let a = Node(id: "btn1", type: "button", catalogID: "catalogA", properties: [:])
+    let b = Node(id: "btn1", type: "button", catalogID: "catalogB", properties: [:])
     #expect(a != b)
   }
 
@@ -136,6 +210,82 @@ struct NodeTests {
     let b = Node(id: "parent", type: "container", properties: ["children": [child2]])
     #expect(a != b)
   }
+
+  // MARK: - Typed Property Accessors
+
+  @Test func stringAccessorUnwrapsLiteralAndBinding() {
+    let literalNode = Node(id: "n1", type: "text", properties: ["text": "hello"])
+    #expect(literalNode.string(for: "text") == "hello")
+
+    let boundNode = Node(
+      id: "n2",
+      type: "text",
+      properties: ["text": DataBinding<String>(identity: .path("/msg"), value: "world")]
+    )
+    #expect(boundNode.string(for: "text") == "world")
+
+    let missingNode = Node(id: "n4", type: "text", properties: [:])
+    #expect(missingNode.string(for: "text") == nil)
+  }
+
+  @Test func doubleAccessorUnwrapsLiteralAndBinding() {
+    let doubleNode = Node(id: "n1", type: "slider", properties: ["max": 100.5])
+    #expect(doubleNode.double(for: "max") == 100.5)
+
+    let boundNode = Node(
+      id: "n2",
+      type: "slider",
+      properties: ["value": DataBinding<Double>(identity: .path("/val"), value: 0.45)]
+    )
+    #expect(boundNode.double(for: "value") == 0.45)
+
+    let missingNode = Node(id: "n3", type: "slider", properties: [:])
+    #expect(missingNode.double(for: "max") == nil)
+  }
+
+  @Test func intAccessorUnwrapsLiteralAndBinding() {
+    let intNode = Node(id: "n1", type: "item", properties: ["weight": 5])
+    #expect(intNode.int(for: "weight") == 5)
+
+    let boundNode = Node(
+      id: "n2",
+      type: "item",
+      properties: ["weight": DataBinding<Int>(identity: .path("/w"), value: 10)]
+    )
+    #expect(boundNode.int(for: "weight") == 10)
+
+    let missingNode = Node(id: "n3", type: "item", properties: [:])
+    #expect(missingNode.int(for: "weight") == nil)
+  }
+
+  @Test func boolAccessorUnwrapsLiteralAndBinding() {
+    let boolNode = Node(id: "n1", type: "checkbox", properties: ["enabled": true])
+    #expect(boolNode.bool(for: "enabled") == true)
+
+    let boundNode = Node(
+      id: "n2",
+      type: "checkbox",
+      properties: ["value": DataBinding<Bool>(identity: .path("/checked"), value: false)]
+    )
+    #expect(boundNode.bool(for: "value") == false)
+  }
+
+  @Test func childAndChildrenAccessors() {
+    let child1 = Node(id: "c1", type: "text", properties: [:])
+    let child2 = Node(id: "c2", type: "text", properties: [:])
+    let parent = Node(
+      id: "p",
+      type: "card",
+      properties: [
+        "child": child1,
+        "children": [child1, child2],
+      ]
+    )
+
+    #expect(parent.child(for: "child")?.id == "c1")
+    #expect(parent.children(for: "children").count == 2)
+    #expect(parent.children(for: "children").map(\.id) == ["c1", "c2"])
+  }
 }
 
 /// A mutable box for testing `DataBinding` closures in a Sendable context.
@@ -144,90 +294,100 @@ final class Box<T>: @unchecked Sendable {
   init(_ value: T) { self.value = value }
 }
 
+@MainActor
 struct DataBindingTests {
 
   // MARK: - Path-based Binding
 
-  @Test func dataBindingGetReturnsCurrentValue() {
-    let box = Box("initial")
+  @Test func dataBindingValueReturnsResolvedValue() {
     let binding = DataBinding<String>(
       identity: .path("/user/name"),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: "initial",
+      set: { _ in }
     )
-    #expect(binding.get() == "initial")
+    #expect(binding.value == "initial")
   }
 
-  @Test func dataBindingSetUpdatesValue() {
+  @Test func dataBindingSetUpdatesViaSetter() {
     let box = Box("initial")
     let binding = DataBinding<String>(
       identity: .path("/user/name"),
-      get: { box.value },
+      value: "initial",
       set: { box.value = $0 }
     )
     binding.set("updated")
-    #expect(binding.get() == "updated")
+    #expect(box.value == "updated")
+  }
+
+  @Test func dataBindingWithNilValue() {
+    let binding = DataBinding<String>(
+      identity: .path("/user/name"),
+      value: nil
+    )
+    #expect(binding.value == nil)
   }
 
   // MARK: - Literal Binding
 
-  @Test func literalDataBindingHasLiteralIdentity() {
-    let box = Box(JSONValue.string("hello"))
+  @Test func literalDataBindingHasLiteralIdentityAndValue() {
     let binding = DataBinding<JSONValue>(
       identity: .literal(.string("hello")),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: .string("hello")
     )
     if case .literal(let val) = binding.identity {
       #expect(val.stringValue == "hello")
     } else {
       Issue.record("Expected .literal identity")
     }
+    #expect(binding.value?.stringValue == "hello")
   }
 
   // MARK: - Equality
 
-  @Test func dataBindingsEqualByIdentity() {
-    let box = Box("")
+  @Test func dataBindingsEqualByIdentityAndValue() {
     let a = DataBinding<String>(
       identity: .path("/user/name"),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: "Alice"
     )
     let b = DataBinding<String>(
       identity: .path("/user/name"),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: "Alice"
     )
     #expect(a == b)
   }
 
-  @Test func dataBindingsNotEqualByDifferentPath() {
-    let box = Box("")
+  @Test func dataBindingsNotEqualByDifferentValue() {
     let a = DataBinding<String>(
       identity: .path("/user/name"),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: "Alice"
+    )
+    let b = DataBinding<String>(
+      identity: .path("/user/name"),
+      value: "Bob"
+    )
+    #expect(a != b)
+  }
+
+  @Test func dataBindingsNotEqualByDifferentPath() {
+    let a = DataBinding<String>(
+      identity: .path("/user/name"),
+      value: "Alice"
     )
     let b = DataBinding<String>(
       identity: .path("/user/email"),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: "Alice"
     )
     #expect(a != b)
   }
 
   @Test func dataBindingsNotEqualByDifferentIdentityType() {
-    let box = Box("")
     let a = DataBinding<String>(
       identity: .path("/user/name"),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: "name"
     )
     let b = DataBinding<String>(
       identity: .literal(.string("name")),
-      get: { box.value },
-      set: { box.value = $0 }
+      value: "name"
     )
     #expect(a != b)
   }
@@ -267,7 +427,7 @@ struct ComponentPropertiesTests {
     #expect(a != b)
   }
 
-  @Test func componentPropertiesInequalityByDifferentJson() throws {
+  @Test func componentPropertiesInequalityByDifferentJSON() throws {
     let schema = try Schema(instance: "{\"type\": \"object\"}")
     let a = ComponentProperties(type: "button", schema: schema, json: ["id": "btn1"])
     let b = ComponentProperties(type: "button", schema: schema, json: ["id": "btn2"])

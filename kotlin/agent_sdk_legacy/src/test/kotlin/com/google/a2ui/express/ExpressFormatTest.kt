@@ -1,5 +1,5 @@
 /*
- * Copyright 2026 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,12 +70,10 @@ class ExpressFormatTest {
     assertTrue(format.parser.hasFormatContent(responseText, complete = true))
 
     val responseParts = format.parser.parseResponse(responseText)
-    assertEquals(2, responseParts.size)
+    assertEquals(1, responseParts.size)
 
-    val textPart = responseParts.first { it.a2uiRaw == null }
-    assertTrue(textPart.text.contains("Here is the requested interface:"))
-
-    val expressPart = responseParts.first { it.a2uiRaw != null }
+    val expressPart = responseParts[0]
+    assertTrue(expressPart.text.contains("Here is the requested interface:"))
     assertNotNull(expressPart.a2uiJson)
     assertEquals(1, expressPart.a2uiJson!!.size)
 

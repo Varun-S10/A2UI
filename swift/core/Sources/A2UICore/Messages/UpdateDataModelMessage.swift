@@ -1,4 +1,4 @@
-// Copyright 2026 Google LLC
+// Copyright 2024 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,11 @@ public struct UpdateDataModelMessage: Codable, Sendable, Equatable {
     surfaceID = try container.decode(String.self, forKey: .surfaceID)
     path = try container.decodeIfPresent(String.self, forKey: .path) ?? "/"
     if container.contains(.value) {
-      value = try container.decode(JSONValue.self, forKey: .value)
+      if try container.decodeNil(forKey: .value) {
+        value = nil
+      } else {
+        value = try container.decode(JSONValue.self, forKey: .value)
+      }
     } else {
       value = nil
     }

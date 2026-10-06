@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 Google LLC
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ export class Audio extends Root {
   @property()
   accessor url: Primitives.StringValue | null = null;
 
-  static styles = [
+  static override styles = [
     structuralStyles,
     css`
       * {
@@ -83,7 +83,7 @@ export class Audio extends Root {
     return html`(empty)`;
   }
 
-  render() {
+  override render() {
     return html`<section
       class=${classMap(this.theme.components.AudioPlayer)}
       style=${this.theme.additionalStyles?.AudioPlayer

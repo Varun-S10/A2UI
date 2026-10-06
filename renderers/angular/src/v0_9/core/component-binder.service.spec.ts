@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,14 +32,14 @@ function createComponentContext({
   componentType?: string;
   data?: Record<string, unknown>;
 }): {context: ComponentContext; surface: SurfaceModel} {
-  const catalog = new Catalog('test-catalog', []);
+  const catalog = new Catalog('test-catalog', '0.9', []);
   const surface = new SurfaceModel('test-surface', catalog);
 
   for (const [path, val] of Object.entries(data)) {
     surface.dataModel.set(path, val);
   }
 
-  const componentModel = new ComponentModel(componentId, componentType, properties);
+  const componentModel = new ComponentModel(componentId, componentType, properties, catalog);
   surface.componentsModel.addComponent(componentModel);
 
   const context = new ComponentContext(surface, componentId);

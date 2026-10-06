@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,8 +24,15 @@ import {
   SurfaceComponentsModel,
   SurfaceModel,
 } from '@a2ui/web_core/v0_9';
-import {Component, EnvironmentInjector, EventEmitter, Input, NgZone} from '@angular/core';
+import {A2uiText} from '@a2ui/web_core/v0_9/basic_catalog';
+import {WebComponentImplementation} from '@a2ui/web_core/v0_9/universal';
+import {Component, EnvironmentInjector, EventEmitter, Input, NgZone, Type} from '@angular/core';
+import {CatalogComponentInstance} from './catalog_component_instance';
+import {AngularCatalog, createComponentImplementation} from '../catalog/types';
+import {UniversalOnlyComponent} from '../catalog/universal_only.component';
 import {initializeAngularReactivity} from './reactivity';
+import {ComponentBinder} from './component-binder.service';
+import {z} from 'zod';
 
 @Component({
   selector: 'test-child',
@@ -38,10 +45,22 @@ class TestChildComponent {
   @Input() dataContextPath?: string;
 }
 
+@Component({
+  selector: 'test-other-child',
+  template: '<div>Other Child Component</div>',
+})
+class TestOtherChildComponent {
+  @Input() props!: {text: {value: () => string}};
+  @Input() surfaceId?: string;
+  @Input() componentId?: string;
+  @Input() dataContextPath?: string;
+}
+
 describe('ComponentHostComponent', () => {
   let component: ComponentHostComponent;
   let fixture: ComponentFixture<ComponentHostComponent>;
   let mockRendererService: any;
+  let mockRendererConfig: any;
   let mockCatalog: any;
   let mockSurface: SurfaceModel<any>;
   let mockSurfaceGroup: any;
@@ -49,26 +68,37 @@ describe('ComponentHostComponent', () => {
   beforeEach(async () => {
     mockCatalog = {
       id: 'test-catalog',
-      components: new Map([['TestType', {component: TestChildComponent}]]),
+      components: new Map<string, unknown>([
+        ['TestType', {component: TestChildComponent}],
+        ['OtherType', {component: TestOtherChildComponent}],
+      ]),
     };
 
     const mockSurfaceComponentsModel = new SurfaceComponentsModel();
     mockSurfaceComponentsModel.addComponent(
-      new ComponentModel('comp1', 'TestType', {text: 'Hello'}),
+      new ComponentModel('comp1', 'TestType', {text: 'Hello'}, mockCatalog),
     );
 
     mockSurface = {
       id: 'surf1',
       componentsModel: mockSurfaceComponentsModel,
-      catalog: mockCatalog,
-    } as SurfaceModel<any>;
+      defaultCatalog: mockCatalog,
+      availableCatalogs: new Map(),
+    } as unknown as SurfaceModel<any>;
 
     mockSurfaceGroup = {
       getSurface: jasmine.createSpy('getSurface').and.returnValue(mockSurface),
     };
 
+    mockRendererConfig = {
+      useUniversalComponents: false,
+    };
+
     mockRendererService = {
       surfaceGroup: mockSurfaceGroup,
+      get useUniversalComponents() {
+        return mockRendererConfig.useUniversalComponents ?? false;
+      },
     };
 
     TestBed.configureTestingModule({
@@ -131,6 +161,59 @@ describe('ComponentHostComponent', () => {
       fixture.detectChanges(); // Propagate changes
 
       expect(childInstance.props.newProp.value()).toBe('new value');
+    });
+
+    // MessageProcessor handles a type change by replacing the ComponentModel under the same id.
+    function replaceComp1(type: string, props: Record<string, unknown>) {
+      mockSurface.componentsModel.removeComponent('comp1');
+      mockSurface.componentsModel.addComponent(
+        new ComponentModel('comp1', type, props, mockCatalog),
+      );
+    }
+
+    it('should re-resolve the rendered component when its type changes in place', () => {
+      fixture.detectChanges();
+      expect(fixture.debugElement.query(By.directive(TestChildComponent))).toBeTruthy();
+
+      replaceComp1('OtherType', {text: 'World'});
+      fixture.detectChanges();
+
+      expect(fixture.debugElement.query(By.directive(TestChildComponent))).toBeFalsy();
+      const other = fixture.debugElement.query(By.directive(TestOtherChildComponent));
+      expect(other).toBeTruthy();
+      expect((other.componentInstance as TestOtherChildComponent).props.text.value()).toBe('World');
+    });
+
+    it('should settle after one re-setup when its onDeleted listener is not the first one', async () => {
+      // Other hosts on the same surface usually subscribe first, which delivers this host's
+      // listener asynchronously. A handler that re-triggers itself would hang this test.
+      mockSurface.componentsModel.onDeleted.subscribe(() => {});
+      mockSurface.componentsModel.onCreated.subscribe(() => {});
+      fixture.detectChanges();
+
+      const bindSpy = spyOn(TestBed.inject(ComponentBinder), 'bind').and.callThrough();
+      replaceComp1('OtherType', {text: 'World'});
+      await new Promise<void>(resolve => setTimeout(resolve));
+      fixture.detectChanges();
+
+      expect(bindSpy).toHaveBeenCalledTimes(1);
+      expect(fixture.debugElement.query(By.directive(TestOtherChildComponent))).toBeTruthy();
+    });
+
+    it('should still re-resolve after a type change to a type missing from the catalog', () => {
+      fixture.detectChanges();
+      const consoleErrorSpy = spyOn(console, 'error');
+
+      replaceComp1('UnknownType', {});
+      fixture.detectChanges();
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Component type "UnknownType" not found in catalog "test-catalog"',
+      );
+      expect(fixture.debugElement.query(By.directive(TestChildComponent))).toBeFalsy();
+
+      replaceComp1('OtherType', {text: 'World'});
+      fixture.detectChanges();
+      expect(fixture.debugElement.query(By.directive(TestOtherChildComponent))).toBeTruthy();
     });
 
     it('should warn and return if surface not found', () => {
@@ -234,6 +317,20 @@ describe('ComponentHostComponent', () => {
       expect(runSpy).toHaveBeenCalled();
     });
 
+    it('should initialize a component created later inside the Angular Zone', () => {
+      fixture.componentRef.setInput('componentKey', {id: 'later', basePath: '/'});
+      fixture.detectChanges();
+
+      const runSpy = spyOn(TestBed.inject(NgZone), 'run').and.callThrough();
+      mockSurface.componentsModel.addComponent(
+        new ComponentModel('later', 'TestType', {text: 'Hi'}, mockCatalog),
+      );
+
+      expect(runSpy).toHaveBeenCalled();
+      fixture.detectChanges();
+      expect(fixture.debugElement.query(By.directive(TestChildComponent))).toBeTruthy();
+    });
+
     it('should run property updates inside the Angular Zone when component model updates', () => {
       fixture.detectChanges();
 
@@ -262,6 +359,113 @@ describe('ComponentHostComponent', () => {
       expect(childDebugElement).toBeTruthy();
       const childInstance = childDebugElement.componentInstance as TestChildComponent;
       expect(childInstance.dataContextPath).toBe('/some/path');
+    });
+
+    class MockWcElement extends HTMLElement {
+      context: any;
+    }
+    const mockWcImpl: WebComponentImplementation = {
+      name: 'WcType',
+      schema: z.object({}),
+      tagName: 'mock-host-wc',
+      element: MockWcElement,
+    };
+
+    it('should render and update universal Web Components when useUniversalComponents is true', () => {
+      if (!customElements.get('mock-host-wc')) {
+        customElements.define('mock-host-wc', MockWcElement);
+      }
+
+      mockCatalog.components.set('WcType', mockWcImpl);
+      mockSurface.componentsModel.addComponent(
+        new ComponentModel('wc1', 'WcType', {label: 'Click me'}),
+      );
+      mockRendererConfig.useUniversalComponents = true;
+
+      const testFixture = TestBed.createComponent(ComponentHostComponent);
+      testFixture.componentRef.setInput('componentKey', {id: 'wc1', basePath: '/test/wc'});
+      testFixture.componentRef.setInput('surfaceId', 'surf1');
+      testFixture.detectChanges();
+
+      const wcEl = testFixture.nativeElement.querySelector('mock-host-wc') as MockWcElement;
+      expect(wcEl).toBeTruthy();
+      expect(wcEl.context).toBeTruthy();
+      expect(wcEl.context.componentModel.id).toBe('wc1');
+      expect(wcEl.context.dataContext.path).toBe('/test/wc');
+
+      // Update component model properties
+      const wcModel = mockSurface.componentsModel.get('wc1')!;
+      wcModel.properties = {label: 'Updated label'};
+      testFixture.detectChanges();
+
+      expect(wcEl.context).toBeTruthy();
+    });
+
+    it('should render the placeholder instead of the Web Component when useUniversalComponents is false', () => {
+      const catalog = new AngularCatalog('test-catalog', '0.9', [mockWcImpl]);
+      mockCatalog.components.set('WcType', catalog.components.get('WcType'));
+      mockSurface.componentsModel.addComponent(new ComponentModel('wc1', 'WcType', {}));
+
+      fixture.componentRef.setInput('componentKey', {id: 'wc1', basePath: '/'});
+      fixture.detectChanges();
+
+      expect(fixture.nativeElement.querySelector('mock-host-wc')).toBeNull();
+      expect(fixture.debugElement.query(By.directive(UniversalOnlyComponent))).toBeTruthy();
+    });
+
+    it('should render the wrapped Web Component when useUniversalComponents is true', () => {
+      mockCatalog.components.set(
+        'TestType',
+        createComponentImplementation(
+          {name: 'TestType', schema: z.object({})},
+          TestChildComponent as unknown as Type<CatalogComponentInstance>,
+        ),
+      );
+      mockRendererConfig.useUniversalComponents = true;
+      const testFixture = TestBed.createComponent(ComponentHostComponent);
+      testFixture.componentRef.setInput('componentKey', {id: 'comp1', basePath: '/'});
+      testFixture.componentRef.setInput('surfaceId', 'surf1');
+      testFixture.detectChanges();
+
+      const wcEl = testFixture.nativeElement.querySelector('a2ui-ng-testtype');
+      expect(wcEl).toBeTruthy();
+      expect(customElements.get('a2ui-ng-testtype')).toBeDefined();
+    });
+
+    it('should render the native Angular component when useUniversalComponents is false', () => {
+      mockCatalog.components.set(
+        'TestType',
+        createComponentImplementation(
+          {name: 'TestType', schema: z.object({})},
+          TestChildComponent as unknown as Type<CatalogComponentInstance>,
+        ),
+      );
+      mockRendererConfig.useUniversalComponents = false;
+      const testFixture = TestBed.createComponent(ComponentHostComponent);
+      testFixture.componentRef.setInput('componentKey', {id: 'comp1', basePath: '/'});
+      testFixture.componentRef.setInput('surfaceId', 'surf1');
+      testFixture.detectChanges();
+
+      expect(testFixture.debugElement.query(By.directive(TestChildComponent))).toBeTruthy();
+      expect(testFixture.nativeElement.querySelector('a2ui-ng-testtype')).toBeFalsy();
+    });
+
+    it('should render native Web Component when useUniversalComponents is true for basic catalog components', () => {
+      const basicImpl = createComponentImplementation(
+        A2uiText,
+        TestChildComponent as unknown as Type<CatalogComponentInstance>,
+      );
+      mockCatalog.components.set('TestType', {...basicImpl, name: 'TestType'});
+      mockRendererConfig.useUniversalComponents = true;
+      const testFixture = TestBed.createComponent(ComponentHostComponent);
+      testFixture.componentRef.setInput('componentKey', {id: 'comp1', basePath: '/'});
+      testFixture.componentRef.setInput('surfaceId', 'surf1');
+      testFixture.detectChanges();
+
+      const wcEl = testFixture.nativeElement.querySelector(A2uiText.tagName);
+      expect(wcEl).toBeTruthy();
+      const wrappedEl = testFixture.nativeElement.querySelector('a2ui-ng-testtype');
+      expect(wrappedEl).toBeFalsy();
     });
   });
 });

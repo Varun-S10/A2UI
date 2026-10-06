@@ -1,11 +1,11 @@
-/**
- * Copyright 2026 Google LLC
+/*
+ * Copyright 2024 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,8 +17,9 @@
 import {DataContext, SurfaceModel} from '@a2ui/web_core/v0_9';
 import {TestBed} from '@angular/core/testing';
 import {DestroyRef, EnvironmentInjector} from '@angular/core';
-import {BasicCatalogBase} from '../catalog/basic/basic-catalog';
+import {BASIC_FUNCTIONS, BasicCatalogBase} from '../catalog/basic/basic-catalog';
 import {assertAngularSignal, initializeAngularReactivity} from './reactivity';
+import {z} from 'zod';
 
 describe('Function Bindings', () => {
   let mockDestroyRef: jasmine.SpyObj<DestroyRef>;
@@ -31,7 +32,15 @@ describe('Function Bindings', () => {
 
   describe('add', () => {
     it('should update output correctly when bound input updates using function call binding', () => {
-      const catalog = new BasicCatalogBase();
+      const addFunction = {
+        name: 'add',
+        returnType: 'number' as const,
+        schema: z.object({a: z.number(), b: z.number()}),
+        execute: (args: Record<string, any>) => (args['a'] as number) + (args['b'] as number),
+      };
+      const catalog = new BasicCatalogBase({
+        functions: [...BASIC_FUNCTIONS, addFunction as any],
+      });
 
       // Create Surface Model and DataContext
       const surface = new SurfaceModel('surface_1', catalog);

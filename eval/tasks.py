@@ -1,10 +1,10 @@
-# Copyright 2026 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     https://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -57,7 +57,7 @@ Notes for grading:
 @task
 def a2ui_v0_9_1_eval(
     list_models: bool = False,
-    grading_model: str = "google/gemini-3.5-flash",
+    grading_model: str = "google/gemini-3.6-flash",
     strategy: str = "direct",
     dataset: str | list[str] | None = None,
 ) -> Task:
@@ -116,7 +116,7 @@ def a2ui_v0_9_1_eval(
 @task
 def a2ui_v1_0_eval(
     list_models: bool = False,
-    grading_model: str = "google/gemini-3.5-flash",
+    grading_model: str = "google/gemini-3.6-flash",
     strategy: str = "express",
     dataset: str | list[str] | None = None,
 ) -> Task:
@@ -148,7 +148,7 @@ def a2ui_v1_0_eval(
         )
 
     active_version = "1.0"
-    default_catalog_path = "specification/v1_0/catalogs/basic/catalog.json"
+    default_catalog_path = "catalogs/basic/v1/catalog.json"
     format_name = (
         strategy if strategy in ["express", "elemental", "atom"] else "direct_json"
     )
