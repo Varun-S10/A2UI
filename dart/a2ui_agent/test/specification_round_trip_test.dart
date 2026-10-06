@@ -45,6 +45,7 @@ void main() {
     '00_complex-layout.json':
         "sets 'weight', which Express has no notation for",
     '00_incremental.json': 'updates the data model below its root',
+    '13_coffee-order.json': "sets 'weight', which Express has no notation for",
     '30_live-invitation-builder.json':
         "sets 'weight', which Express has no notation for",
     '31_incremental-dashboard.json':
