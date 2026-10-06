@@ -32,7 +32,6 @@ from inspect_ai.solver import TaskState
 from inspect_ai.model._model import sample_model_usage
 from a2ui.core.exceptions import (
     A2uiCatalogError,
-    A2uiCompileError,
     A2uiError,
     A2uiIntegrityError,
     A2uiParseError,
@@ -99,17 +98,21 @@ def classify_exception(e: Exception) -> tuple[str, str]:
         return "integrity_error", "integrity_error"
 
     if isinstance(e, A2uiRecursionError):
+        msg = str(e).lower()
+        if "circular reference" in msg or "self-reference" in msg:
+            return "integrity_error", "integrity_error"
         return "recursion_error", "recursion_error"
 
     if isinstance(e, A2uiCatalogError):
         return "catalog_error", "catalog_error"
 
-    if isinstance(e, (A2uiCompileError, A2uiCompilationError, ExpressCompilerError)):
+    if isinstance(e, (A2uiCompilationError, ExpressCompilerError)):
         return "compile_error", "compile_error"
 
     if isinstance(e, A2uiValidationError):
-        if getattr(e, "details", None) and e.details and e.details[0].code:
-            return "validation_error", f"validation_error:{e.details[0].code}"
+        details = getattr(e, "details", None)
+        if isinstance(details, list) and details and getattr(details[0], "code", None):
+            return "validation_error", f"validation_error:{details[0].code}"
 
         # If it is a wrapper exception without details, check error message for integrity/recursion
         msg = str(e).lower()
@@ -118,6 +121,7 @@ def classify_exception(e: Exception) -> tuple[str, str]:
             or "duplicate component id" in msg
             or "references non-existent component" in msg
             or "circular reference" in msg
+            or "not reachable from" in msg
         ):
             return "integrity_error", "integrity_error"
         if "recursion limit exceeded" in msg:
@@ -127,7 +131,9 @@ def classify_exception(e: Exception) -> tuple[str, str]:
 
     if isinstance(e, A2uiParseError):
         msg = str(e).lower()
-        if "not found in response" in msg or "empty" in msg:
+        if "close tag" not in msg and (
+            "not found in response" in msg or "empty" in msg
+        ):
             return "no_a2ui_payload_found", "no_a2ui_payload_found"
         return "parse_error", "parse_error"
 
@@ -176,7 +182,6 @@ def a2ui_scorer(version: str) -> Scorer:
             experiments={"version_1_0"} if version == "1.0" else None,
         )
         catalog = direct_json_format.get_selected_catalog()
-        validator = catalog.validator
 
         answer_text = state.output.completion or ""
 
@@ -229,13 +234,15 @@ def a2ui_scorer(version: str) -> Scorer:
                 "coarse_category": coarse,
                 "error_type": type(e).__name__,
             }
+            details = getattr(e, "details", None)
             if (
                 isinstance(e, A2uiValidationError)
-                and getattr(e, "details", None)
-                and e.details
+                and isinstance(details, list)
+                and details
+                and details[0]
             ):
-                metadata["error_code"] = e.details[0].code
-                metadata["error_path"] = e.details[0].path
+                metadata["error_code"] = getattr(details[0], "code", None)
+                metadata["error_path"] = getattr(details[0], "path", None)
             return Score(
                 value=0.0,
                 answer=answer_text,

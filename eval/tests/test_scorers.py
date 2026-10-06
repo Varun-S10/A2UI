@@ -23,7 +23,6 @@ from a2ui_eval.scorers import (
 )
 from a2ui.core.exceptions import (
     A2uiCatalogError,
-    A2uiCompileError,
     A2uiError,
     A2uiErrorDetail,
     A2uiIntegrityError,
@@ -31,6 +30,7 @@ from a2ui.core.exceptions import (
     A2uiRecursionError,
     A2uiValidationError,
 )
+from a2ui.parser.errors import A2uiCompilationError
 from inspect_ai.scorer import Target, SampleScore, Score
 from inspect_ai.solver import TaskState
 from inspect_ai.model import ModelOutput, ModelName
@@ -261,7 +261,17 @@ async def test_scorer_validation_missing_field() -> None:
       {
         "version": "v0.9",
         "createSurface": {
+          "surfaceId": "main",
           "catalogId": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+        }
+      },
+      {
+        "version": "v0.9",
+        "updateComponents": {
+          "surfaceId": "main",
+          "components": [
+            {"id": "root", "component": "Text"}
+          ]
         }
       }
     ]
@@ -294,8 +304,33 @@ async def test_scorer_validation_type_mismatch() -> None:
       {
         "version": "v0.9",
         "createSurface": {
-          "surfaceId": 12345,
+          "surfaceId": "main",
           "catalogId": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+        }
+      },
+      {
+        "version": "v0.9",
+        "updateComponents": {
+          "surfaceId": "main",
+          "components": [
+            {
+              "id": "root",
+              "component": "Text",
+              "text": {
+                "call": "formatDate",
+                "returnType": "string",
+                "args": {
+                  "format": "yyyy",
+                  "value": [
+                    {
+                      "function": "openUrl",
+                      "args": "not_an_object"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
         }
       }
     ]
@@ -329,8 +364,16 @@ async def test_scorer_validation_extra_field() -> None:
         "version": "v0.9",
         "createSurface": {
           "surfaceId": "main",
-          "catalogId": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json",
-          "extraPropertyNotAllowed": true
+          "catalogId": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+        }
+      },
+      {
+        "version": "v0.9",
+        "updateComponents": {
+          "surfaceId": "main",
+          "components": [
+            {"id": "root", "component": "Text", "text": "Hello", "extraPropertyNotAllowed": true}
+          ]
         }
       }
     ]
@@ -535,6 +578,72 @@ async def test_scorer_circular_reference() -> None:
     assert score.metadata.get("coarse_category") == "integrity_error"
 
 
+@pytest.mark.asyncio
+async def test_scorer_orphan_component() -> None:
+    scorer = a2ui_scorer(version="0.9")
+    payload = """
+    <a2ui-json>
+    [
+      {
+        "version": "v0.9",
+        "createSurface": {
+          "surfaceId": "main",
+          "catalogId": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json"
+        }
+      },
+      {
+        "version": "v0.9",
+        "updateComponents": {
+          "surfaceId": "main",
+          "components": [
+            {"id": "root", "component": "Text", "text": "Hello"},
+            {"id": "orphan", "component": "Text", "text": "Unreachable"}
+          ]
+        }
+      }
+    ]
+    </a2ui-json>
+    """
+    state = TaskState(
+        model=ModelName("mock/model"),
+        sample_id=1,
+        epoch=1,
+        input="test",
+        messages=[],
+        output=ModelOutput(model="mock/model", completion=payload),
+        metadata={"catalog": str(CATALOG_PATH)},
+    )
+    score = await scorer(state, Target(""))
+    assert score is not None
+    assert score.value == 0.0
+    assert score.metadata is not None
+    assert score.metadata.get("failure_category") == "integrity_error"
+    assert score.metadata.get("coarse_category") == "integrity_error"
+
+
+@pytest.mark.asyncio
+async def test_scorer_unclosed_tag() -> None:
+    scorer = a2ui_scorer(version="0.9")
+    state = TaskState(
+        model=ModelName("mock/model"),
+        sample_id=1,
+        epoch=1,
+        input="test",
+        messages=[],
+        output=ModelOutput(
+            model="mock/model",
+            completion='<a2ui-json>\n{"version": "v0.9"}',
+        ),
+        metadata={"catalog": str(CATALOG_PATH)},
+    )
+    score = await scorer(state, Target(""))
+    assert score is not None
+    assert score.value == 0.0
+    assert score.metadata is not None
+    assert score.metadata.get("failure_category") == "parse_error"
+    assert score.metadata.get("coarse_category") == "parse_error"
+
+
 def test_classify_exception() -> None:
     # 1. Validation errors with details
     val_err_missing = A2uiValidationError(
@@ -566,6 +675,20 @@ def test_classify_exception() -> None:
         "parse_error",
         "parse_error",
     )
+    assert classify_exception(
+        A2uiParseError("A2UI close tag '</a2ui-json>' not found in response.")
+    ) == (
+        "parse_error",
+        "parse_error",
+    )
+    assert classify_exception(
+        A2uiParseError(
+            "A2UI tags '<a2ui-json>' and '</a2ui-json>' not found in response."
+        )
+    ) == (
+        "no_a2ui_payload_found",
+        "no_a2ui_payload_found",
+    )
     assert classify_exception(json.JSONDecodeError("msg", "doc", 0)) == (
         "parse_error",
         "parse_error",
@@ -573,6 +696,12 @@ def test_classify_exception() -> None:
 
     # 3. Integrity errors
     assert classify_exception(A2uiIntegrityError("Duplicate ID")) == (
+        "integrity_error",
+        "integrity_error",
+    )
+    assert classify_exception(
+        A2uiValidationError("Component 'orphan' is not reachable from 'root'")
+    ) == (
         "integrity_error",
         "integrity_error",
     )
@@ -590,7 +719,9 @@ def test_classify_exception() -> None:
     )
 
     # 6. Compilation errors
-    assert classify_exception(A2uiCompileError("DSL compile failed")) == (
+    assert classify_exception(
+        A2uiCompilationError("DSL compile failed", raw_content="")
+    ) == (
         "compile_error",
         "compile_error",
     )
