@@ -15,7 +15,7 @@
 from collections.abc import AsyncIterable
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from a2a.types import (
     AgentCapabilities,
@@ -28,11 +28,12 @@ from a2ui.a2a import (
     get_a2ui_agent_extension,
     parse_response_to_parts,
 )
-from a2ui.basic_catalog.provider import BasicCatalog
+from a2ui.core.basic_catalog import BasicCatalog
 from a2ui.core.parser.parser import parse_response
 from a2ui.core.schema.common_modifiers import remove_strict_validation
 from a2ui.core.schema.constants import A2UI_CLOSE_TAG, A2UI_OPEN_TAG, VERSION_0_8
 from a2ui.inference_formats.direct_json import DirectJsonFormat
+from a2ui.schema import CatalogConfig
 import dotenv
 from google.adk.agents import run_config
 from google.adk.agents.llm_agent import LlmAgent
@@ -57,12 +58,10 @@ class ContactAgent:
         self.base_url = base_url
         self._agent_name = "contact_agent"
         self._user_id = "remote_agent"
-        self._text_runner: Optional[Runner] = self._build_runner(
-            self._build_llm_agent()
-        )
+        self._text_runner: Runner | None = self._build_runner(self._build_llm_agent())
 
-        self._inference_formats: Dict[str, DirectJsonFormat] = {}
-        self._ui_runners: Dict[str, Runner] = {}
+        self._inference_formats: dict[str, DirectJsonFormat] = {}
+        self._ui_runners: dict[str, Runner] = {}
 
         # Gemini Enerprise only supports VERSION_0_8 for now.
         for version in [VERSION_0_8]:
@@ -82,8 +81,9 @@ class ContactAgent:
         return DirectJsonFormat(
             version=version,
             catalogs=[
-                BasicCatalog.get_config(
-                    version=version,
+                CatalogConfig.from_catalog(
+                    "basic",
+                    BasicCatalog(version),
                     examples_path=os.path.join(
                         os.path.dirname(__file__), f"examples/{version}"
                     ),
@@ -150,7 +150,7 @@ class ContactAgent:
         return "Looking up contact information..."
 
     def _build_llm_agent(
-        self, inference_format: Optional[DirectJsonFormat] = None
+        self, inference_format: DirectJsonFormat | None = None
     ) -> LlmAgent:
         """Builds the LLM agent for the contact agent."""
 
@@ -176,7 +176,7 @@ class ContactAgent:
         )
 
     async def fetch_response(
-        self, query, session_id, ui_version: Optional[str] = None
+        self, query, session_id, ui_version: str | None = None
     ) -> list[Part]:
         """Fetches the response from the agent."""
 
@@ -332,7 +332,7 @@ class ContactAgent:
                                 "--- ContactAgent.fetch_response: Validating against"
                                 " A2UI_SCHEMA... ---"
                             )
-                            selected_catalog.validator.validate(parsed_json_data)
+                            selected_catalog.validate_components(parsed_json_data)
                             # --- End Validation Steps ---
 
                             print(

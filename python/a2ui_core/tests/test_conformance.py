@@ -1,0 +1,1812 @@
+# Copyright 2024 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import contextlib
+import glob
+import json
+import os
+import re
+from typing import Any
+import pytest
+import yaml
+
+from a2ui.core.catalog import Catalog, CatalogApi
+from a2ui.core.basic_catalog import v0_8, v0_9, v1_0
+from a2ui.core.schema import ProtocolVersion
+from a2ui.core.state import DataModel, SurfaceModel
+from a2ui.core.resolution import DataContext
+from a2ui.core.processing import (
+    CapabilitiesOptions,
+    MessageProcessor,
+    MessageProcessorOptions,
+)
+from a2ui.core.validation import STRICT_VALIDATION, PayloadValidator
+from a2ui.core.exceptions import (
+    A2uiCatalogError,
+    A2uiDataError,
+    A2uiError,
+    A2uiExpressionError,
+    A2uiIntegrityError,
+    A2uiParseError,
+    A2uiRecursionError,
+    A2uiStateError,
+    A2uiValidationError,
+)
+
+CATEGORY_TO_EXCEPTION = {
+    "ParseError": (A2uiParseError, A2uiExpressionError),
+    "ValidationError": (A2uiValidationError,),
+    "CatalogError": (A2uiCatalogError,),
+    "IntegrityError": (A2uiIntegrityError, A2uiRecursionError),
+    "RecursionError": (A2uiRecursionError,),
+    "DataError": (A2uiDataError,),
+    "StateError": (A2uiStateError,),
+    "ExpressionError": (A2uiExpressionError,),
+}
+
+SUPPORTED_PROTOCOL_VERSIONS = {
+    "v0.8",
+    "v0.9",
+    "v0.9.1",
+    "v1.0",
+    "0.8",
+    "0.9",
+    "0.9.1",
+    "1.0",
+}
+
+SKIP_TEST_NAMES: set[str] = set()
+
+# Transition skip list containing specific test suite files or basenames to skip entirely.
+SKIP_TEST_SUITES: set[str] = set()
+
+# Suites the core library cannot meaningfully execute, with the reason for each.
+# The core library has no access to the UI frameworks that apply accessibility
+# attributes, so running these here would only exercise mocks. The framework
+# renderers will run them once the v1.0 catalogs land for those renderers.
+UNRUNNABLE_SUITES: dict[str, str] = {
+    "core/accessibility.yaml": (
+        "Accessibility attributes are applied by the UI framework renderers"
+        " (Lit, React, Angular, Flutter, SwiftUI), which the core library does"
+        " not have access to. Pending v1.0 catalogs for those renderers."
+    ),
+    "core/node_resolution.yaml": "The Python core has no node resolution layer.",
+}
+
+# Root core conformance directory resolution
+CONFORMANCE_ROOT = os.environ.get(
+    "CONFORMANCE_ROOT",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../conformance")),
+)
+SPEC_ROOT = os.environ.get(
+    "SPEC_ROOT",
+    os.path.abspath(os.path.join(CONFORMANCE_ROOT, "../specification")),
+)
+CORE_DIR = os.path.join(CONFORMANCE_ROOT, "core")
+
+
+def _version_dir(ver: str) -> str:
+    v = ver.lower().replace(".", "_")
+    return v if v.startswith("v") else f"v{v}"
+
+
+basic_catalog = v0_9.BasicCatalog()
+v08_catalog = v0_8.BasicCatalog()
+v09_catalog = v0_9.BasicCatalog()
+v10_catalog = v1_0.BasicCatalog()
+ALL_CATALOGS = [basic_catalog, v08_catalog, v09_catalog, v10_catalog]
+
+
+def find_yaml_files(dir_path: str) -> list[str]:
+    results = []
+    if not os.path.exists(dir_path):
+        return results
+    for root, _, files in os.walk(dir_path):
+        for file in files:
+            if file.endswith(".yaml") or file.endswith(".yml"):
+                results.append(os.path.join(root, file))
+    return sorted(results)
+
+
+def resolve_protocol_version(case: dict[str, Any]) -> str | None:
+    if "protocolVersion" in case and case["protocolVersion"]:
+        return case["protocolVersion"]
+    cat_spec = case.get("catalog") if isinstance(case.get("catalog"), dict) else {}
+    if "protocolVersion" in cat_spec and cat_spec["protocolVersion"]:
+        return cat_spec["protocolVersion"]
+    c_schema = (
+        case.get("catalogSchema") if isinstance(case.get("catalogSchema"), dict) else {}
+    )
+    if "protocolVersion" in c_schema and c_schema["protocolVersion"]:
+        return c_schema["protocolVersion"]
+    if "catalogs" in case and isinstance(case["catalogs"], list):
+        for cat in case["catalogs"]:
+            if isinstance(cat, dict) and cat.get("protocolVersion"):
+                return cat["protocolVersion"]
+    cat_id = str(
+        case.get("catalogId")
+        or cat_spec.get("catalogId")
+        or c_schema.get("catalogId")
+        or ""
+    )
+    if "v08" in cat_id or "v0_8" in cat_id:
+        return "v0.8"
+    if "v09" in cat_id or "v0_9" in cat_id:
+        return "v0.9"
+    if "v10" in cat_id or "v1_0" in cat_id or "v1.0" in cat_id:
+        return "v1.0"
+    return "v0.9"
+
+
+def resolve_catalog_id(case: dict[str, Any]) -> str | None:
+    cat_spec = case.get("catalog") if isinstance(case.get("catalog"), dict) else {}
+    c_schema = (
+        cat_spec.get("catalogSchema")
+        if isinstance(cat_spec.get("catalogSchema"), dict)
+        else {}
+    )
+    return (
+        case.get("catalogId") or cat_spec.get("catalogId") or c_schema.get("catalogId")
+    )
+
+
+SUITE_LOAD_ERRORS: list[str] = []
+"""Problems encountered while loading suites, reported by `test_all_suites_load`.
+
+Collected rather than raised so that a single malformed suite does not abort
+collection of every other case.
+"""
+
+
+def load_conformance_cases() -> list[tuple[str, str, dict[str, Any]]]:
+    cases = []
+    yaml_files = find_yaml_files(CORE_DIR)
+    if not yaml_files:
+        SUITE_LOAD_ERRORS.append(f"No conformance suites found under {CORE_DIR}")
+    for file_path in yaml_files:
+        rel_path = os.path.relpath(file_path, CONFORMANCE_ROOT)
+        base_name = os.path.basename(file_path)
+        if rel_path in SKIP_TEST_SUITES or base_name in SKIP_TEST_SUITES:
+            continue
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except Exception as err:
+            SUITE_LOAD_ERRORS.append(f"{rel_path}: failed to parse: {err}")
+            continue
+
+        if not isinstance(data, list):
+            SUITE_LOAD_ERRORS.append(
+                f"{rel_path}: expected a list of test cases, got {type(data).__name__}"
+            )
+            continue
+
+        for index, case in enumerate(data):
+            if not isinstance(case, dict):
+                SUITE_LOAD_ERRORS.append(f"{rel_path}: entry {index} is not a mapping")
+                continue
+            name = case.get("name")
+            if not name:
+                SUITE_LOAD_ERRORS.append(f"{rel_path}: entry {index} has no 'name'")
+                continue
+            if name in SKIP_TEST_NAMES:
+                continue
+
+            test_id = f"{rel_path}::{name}"
+            cases.append((test_id, rel_path, case))
+    return cases
+
+
+def get_catalogs_for_test_case(case: dict[str, Any]) -> list[Any]:
+    catalogs_map: dict[str, Any] = {}
+
+    for cat in ALL_CATALOGS:
+        if hasattr(cat, "catalog_id"):
+            catalogs_map[cat.catalog_id] = cat
+    standard_catalog = Catalog(
+        catalog_id="standard",
+        protocol_version="v0.9",
+        components=list(basic_catalog.components.values()),
+    )
+    catalogs_map["basic"] = basic_catalog
+    catalogs_map["standard"] = standard_catalog
+    catalogs_map["v0.8:basic"] = v08_catalog
+    catalogs_map["v0.9:basic"] = v09_catalog
+    catalogs_map["v1.0:basic"] = v10_catalog
+
+    version = resolve_protocol_version(case) or "v0.9"
+    cur_basic = (
+        v10_catalog
+        if version == "v1.0"
+        else (v08_catalog if version == "v0.8" else v09_catalog)
+    )
+    v10_basic_alias = Catalog(
+        catalog_id="basic",
+        protocol_version="v1.0",
+        components=list(v10_catalog.components.values()),
+        functions=list(v10_catalog.functions.values()),
+    )
+
+    if version == "v1.0":
+        catalogs_map["basic"] = v10_basic_alias
+
+    def add_catalog_id(cat_id: str, ver: str | None = None):
+        if cat_id and (
+            cat_id not in catalogs_map
+            or not any(
+                getattr(c, "catalog_id", None) == cat_id for c in catalogs_map.values()
+            )
+        ):
+            catalogs_map[cat_id] = Catalog(
+                catalog_id=cat_id,
+                protocol_version=ver or version,
+                components=list(cur_basic.components.values()),
+            )
+
+    specified_catalogs: list[Any] = []
+
+    if "catalog" in case and isinstance(case["catalog"], dict):
+        cat_spec = case["catalog"]
+        if "catalogSchema" in cat_spec:
+            c_schema = cat_spec["catalogSchema"]
+            c_id = resolve_catalog_id(case) or f"catalog-{case.get('name')}"
+            p_ver = resolve_protocol_version(case) or "v0.9"
+            if c_id:
+                cat = Catalog.from_json(
+                    c_schema, catalog_id=c_id, protocol_version=p_ver
+                )
+                catalogs_map[c_id] = cat
+                specified_catalogs.append(cat)
+        elif "components" in cat_spec or "catalogId" in cat_spec:
+            c_id = (
+                cat_spec.get("catalogId")
+                or resolve_catalog_id(case)
+                or f"catalog-{case.get('name')}"
+            )
+            p_ver = resolve_protocol_version(case) or "v0.9"
+            c_comps = cat_spec.get("components")
+            c_theme = cat_spec.get("theme")
+            c_funcs = cat_spec.get("functions")
+            if c_comps or c_theme or c_funcs:
+                c_schema = {"catalogId": c_id}
+                if not c_funcs:
+                    c_schema["$defs"] = {"anyFunction": {"not": {}}}
+                if c_comps:
+                    c_schema["components"] = c_comps
+                if c_theme:
+                    c_schema["theme"] = c_theme
+                if c_funcs:
+                    c_schema["functions"] = c_funcs
+                cat = Catalog.from_json(
+                    c_schema,
+                    catalog_id=c_id,
+                    protocol_version=p_ver,
+                )
+            else:
+                default_comps = (
+                    []
+                    if case.get("action")
+                    in ("get_client_capabilities", "get_renderer_capabilities")
+                    else list(basic_catalog.components.values())
+                )
+                cat = Catalog(
+                    catalog_id=c_id,
+                    protocol_version=p_ver,
+                    components=default_comps,
+                )
+            catalogs_map[c_id] = cat
+            specified_catalogs.append(cat)
+
+    if "catalogs" in case and isinstance(case["catalogs"], list):
+        for item in case["catalogs"]:
+            if isinstance(item, dict):
+                if "catalogSchema" in item:
+                    c_schema = item["catalogSchema"]
+                    c_id = c_schema.get("catalogId") or item.get("catalogId")
+                    p_ver = (
+                        item.get("protocolVersion")
+                        or c_schema.get("protocolVersion")
+                        or "v0.9"
+                    )
+                    if c_id:
+                        cat = Catalog.from_json(
+                            c_schema, catalog_id=c_id, protocol_version=p_ver
+                        )
+                        catalogs_map[c_id] = cat
+                        specified_catalogs.append(cat)
+                elif "catalogId" in item:
+                    c_id = item["catalogId"]
+                    p_ver = item.get("protocolVersion") or version
+                    c_comps = item.get("components")
+                    c_theme = item.get("theme")
+                    c_funcs = item.get("functions")
+                    if c_comps or c_theme or c_funcs:
+                        c_schema = {"catalogId": c_id}
+                        if c_comps:
+                            c_schema["components"] = c_comps
+                        if c_theme:
+                            c_schema["theme"] = c_theme
+                        if c_funcs:
+                            c_schema["functions"] = c_funcs
+                        cat = Catalog.from_json(
+                            c_schema, catalog_id=c_id, protocol_version=p_ver
+                        )
+                    else:
+                        default_comps = (
+                            []
+                            if case.get("action")
+                            in ("get_client_capabilities", "get_renderer_capabilities")
+                            else list(basic_catalog.components.values())
+                        )
+                        cat = Catalog(
+                            catalog_id=c_id,
+                            protocol_version=p_ver,
+                            components=default_comps,
+                        )
+                    catalogs_map[c_id] = cat
+                    specified_catalogs.append(cat)
+    if "catalogPaths" in case and isinstance(case["catalogPaths"], list):
+        for p in case["catalogPaths"]:
+            full_p = os.path.abspath(os.path.join(CONFORMANCE_ROOT, "../", p))
+            if not os.path.exists(full_p):
+                raise FileNotFoundError(
+                    f"catalogPaths entry '{p}' does not exist (resolved to {full_p})"
+                )
+            if os.path.exists(full_p):
+                with open(full_p, "r", encoding="utf-8") as f:
+                    c_json = json.load(f)
+                    c_id = c_json.get("catalogId") or c_json.get("id") or "test-catalog"
+                    p_ver = resolve_protocol_version(case) or "v0.9"
+                    if (
+                        c_id
+                        in (
+                            v10_catalog.catalog_id,
+                            v09_catalog.catalog_id,
+                            v08_catalog.catalog_id,
+                        )
+                        or "basic/catalog.json" in p
+                    ):
+                        matching_basic = (
+                            v10_catalog
+                            if "1.0" in p_ver
+                            else (v08_catalog if "0.8" in p_ver else v09_catalog)
+                        )
+                        specified_catalogs.append(matching_basic)
+                        catalogs_map[c_id] = matching_basic
+                    else:
+                        cat = Catalog.from_json(
+                            c_json, catalog_id=c_id, protocol_version=p_ver
+                        )
+                        specified_catalogs.append(cat)
+                        if c_id != "test-catalog":
+                            test_cat = Catalog.from_json(
+                                c_json,
+                                catalog_id="test-catalog",
+                                protocol_version=p_ver,
+                            )
+                            catalogs_map["test-catalog"] = test_cat
+                            specified_catalogs.append(test_cat)
+
+    messages: list[Any] = case.get("messages") or (
+        [case["payload"]] if "payload" in case else []
+    )
+    if "steps" in case:
+        for step in case["steps"]:
+            msgs = step.get("messages") or step.get("payload")
+            if msgs:
+                if isinstance(msgs, list):
+                    messages.extend(msgs)
+                elif isinstance(msgs, dict):
+                    messages.append(msgs)
+
+    expect_err = case.get("expectError")
+    is_catalog_error_case = isinstance(expect_err, dict) and expect_err.get(
+        "category"
+    ) in ("CatalogError", "A2uiCatalogError")
+
+    scan_version: str | None = None
+
+    def scan(item: Any):
+        nonlocal scan_version
+        if not item:
+            return
+        if isinstance(item, list):
+            for sub in item:
+                scan(sub)
+        elif isinstance(item, dict):
+            if "version" in item and isinstance(item["version"], str):
+                scan_version = item["version"]
+            if "messages" in item:
+                scan(item["messages"])
+            if not is_catalog_error_case:
+                if (
+                    "createSurface" in item
+                    and isinstance(item["createSurface"], dict)
+                    and "catalogId" in item["createSurface"]
+                ):
+                    add_catalog_id(item["createSurface"]["catalogId"], scan_version)
+                if (
+                    "beginRendering" in item
+                    and isinstance(item["beginRendering"], dict)
+                    and "catalogId" in item["beginRendering"]
+                ):
+                    add_catalog_id(item["beginRendering"]["catalogId"], scan_version)
+
+    scan(messages)
+    if (
+        case.get("action") in ("get_client_capabilities", "get_renderer_capabilities")
+        and specified_catalogs
+    ):
+        return specified_catalogs
+    return (
+        specified_catalogs
+        + [cur_basic]
+        + [
+            c
+            for c in catalogs_map.values()
+            if c not in specified_catalogs and c != cur_basic
+        ]
+    )
+
+
+@contextlib.contextmanager
+def assert_raises(expect_error: Any):
+    if isinstance(expect_error, dict):
+        category = expect_error.get("category")
+        message = expect_error.get("message", "")
+        expected_class = CATEGORY_TO_EXCEPTION.get(category, (A2uiError, ValueError))
+    else:
+        expected_class = (A2uiError, ValueError)
+        message = str(expect_error)
+
+    with pytest.raises(expected_class) as excinfo:
+        yield
+
+    if message:
+        msg_norm = message.lower()
+        err_details = getattr(excinfo.value, "details", [])
+        detail_msgs = (
+            " ".join([d.message for d in err_details]).lower() if err_details else ""
+        )
+        err_str = f"{str(excinfo.value).lower()} {detail_msgs}"
+        match = (
+            message in str(excinfo.value)
+            or (err_details and any(message in d.message for d in err_details))
+            or re.search(re.escape(message), str(excinfo.value))
+            or re.search(message, str(excinfo.value))
+            or (
+                "not of type" in msg_norm
+                and (
+                    "input should be" in err_str
+                    or "type_mismatch" in err_str
+                    or "must be a" in err_str
+                )
+            )
+            or (
+                "is a required property" in msg_norm
+                and ("field required" in err_str or "missing" in err_str)
+            )
+            or (
+                "additional properties are not allowed" in msg_norm
+                and ("extra inputs are not permitted" in err_str or "extra" in err_str)
+            )
+            or (
+                "circular" in msg_norm
+                and ("circular" in err_str or "self-reference" in err_str)
+            )
+            or ("orphan" in msg_norm and "orphan" in err_str)
+            or (
+                "was unexpected" in msg_norm
+                and ("unrecognized" in err_str or "unexpected" in err_str)
+            )
+            or (
+                "cannot contain child" in msg_norm and "cannot contain child" in err_str
+            )
+            or (
+                "cannot be placed under parent" in msg_norm
+                and "cannot be placed under parent" in err_str
+            )
+            or (
+                (
+                    "protocol version mismatch" in msg_norm
+                    or "mismatched protocol" in msg_norm
+                )
+                and (
+                    "mismatched protocol" in err_str
+                    or "protocol version mismatch" in err_str
+                )
+            )
+        )
+        assert (
+            match
+        ), f"Expected error '{message}' not found in exception '{excinfo.value}'"
+
+    if isinstance(expect_error, dict) and expect_error.get("code"):
+        expected_code = expect_error["code"]
+        err_details = getattr(excinfo.value, "details", [])
+        detail_codes = [d.code for d in err_details] if err_details else []
+        exc_code = getattr(excinfo.value, "code", None)
+        assert (
+            expected_code in detail_codes
+            or expected_code == exc_code
+            or expected_code in str(excinfo.value)
+        ), (
+            f"Expected error code '{expected_code}' not found in exception details"
+            f" ({detail_codes}), code ({exc_code}), or message ('{excinfo.value}')"
+        )
+
+
+CONFORMANCE_CASES = load_conformance_cases()
+
+
+def test_all_suites_load() -> None:
+    """Every conformance suite parses into a list of named test cases."""
+    assert not SUITE_LOAD_ERRORS, "Conformance suites failed to load:\n" + "\n".join(
+        SUITE_LOAD_ERRORS
+    )
+
+
+@pytest.mark.parametrize(
+    "test_id, rel_path, case",
+    CONFORMANCE_CASES,
+    ids=[c[0] for c in CONFORMANCE_CASES],
+)
+def test_conformance_suite(test_id: str, rel_path: str, case: dict[str, Any]) -> None:
+    ver = resolve_protocol_version(case)
+    if ver and ver not in SUPPORTED_PROTOCOL_VERSIONS:
+        pytest.fail(
+            f"Test case '{test_id}' specifies unsupported protocol version '{ver}'."
+        )
+
+    action = case.get("action")
+    if not action:
+        pytest.fail(f"Test case '{test_id}' missing required 'action' field.")
+
+    if action == "from_json":
+        validate_from_json_case(case)
+    elif action == "catalog_schema":
+        validate_catalog_schema_case(case)
+    elif action == "common_types_schema":
+        validate_common_types_schema_case(case)
+    elif action == "agent_to_renderer_schema":
+        validate_agent_to_renderer_schema_case(case)
+    elif action == "validate_common_type":
+        validate_common_type_case(case)
+    elif action == "validate":
+        validate_pure_validation_case(case)
+    elif action == "process_messages":
+        validate_process_messages_case(case)
+    elif action in (
+        "get_client_capabilities",
+        "get_renderer_capabilities",
+    ):
+        validate_capabilities_case(case)
+    elif action in ("get_renderer_data_model", "get_client_data_model"):
+        validate_get_renderer_data_model_case(case)
+    elif action == "resolve_path":
+        validate_resolve_path_case(case)
+    elif action == "data_model":
+        validate_data_model_case(case)
+    elif action == "handle_rpc":
+        validate_handle_rpc_case(case)
+    elif action == "select_catalog":
+        validate_select_catalog_case(case)
+    elif action == "accessibility_check":
+        validate_accessibility_check_case(case)
+    elif action == "parse_expression_template":
+        validate_parse_expression_template_case(case)
+    elif action == "resolve_nodes" and rel_path == "core/node_resolution.yaml":
+        pytest.skip(UNRUNNABLE_SUITES[rel_path])
+    elif action == "evaluate_function":
+        validate_evaluate_function_case(case)
+    elif action == "dispatch_action":
+        validate_dispatch_action_case(case)
+    else:
+        pytest.fail(
+            f"Action '{action}' has no handler in the core Python harness."
+            " Add one, or add the suite to UNRUNNABLE_SUITES with a reason."
+        )
+
+
+def test_resolve_nodes_outside_its_suite_is_unsupported() -> None:
+    case = {"name": "stray", "action": "resolve_nodes"}
+    with pytest.raises(BaseException) as outcome:
+        test_conformance_suite(
+            "core/data_model.yaml::stray", "core/data_model.yaml", case
+        )
+    assert isinstance(outcome.value, pytest.fail.Exception), outcome.value
+
+
+def test_catalog_conformance_covers_published_catalogs() -> None:
+    """Every published catalog has a from_json selfContained case in catalog.yaml."""
+    repo_root = os.path.abspath(os.path.join(CONFORMANCE_ROOT, ".."))
+    published = sorted(
+        os.path.relpath(path, repo_root).replace(os.sep, "/")
+        for pattern in (
+            "specification/*/catalogs/*/catalog.json",
+            "catalogs/*/v*/catalog.json",
+        )
+        for path in glob.glob(os.path.join(repo_root, pattern))
+    )
+    assert published, f"No published catalogs found under {repo_root}"
+    with open(os.path.join(CORE_DIR, "catalog.yaml"), "r", encoding="utf-8") as f:
+        cases = yaml.safe_load(f)
+    covered = {
+        case["catalogPath"]
+        for case in cases
+        if case.get("action") == "from_json"
+        and "catalogPath" in case
+        and (case.get("expect") or {}).get("selfContained") is True
+    }
+    missing = [path for path in published if path not in covered]
+    assert not missing, (
+        "Published catalogs without a from_json selfContained case in"
+        f" conformance/core/catalog.yaml: {missing}"
+    )
+
+
+def _resolve_surface_components(surface: Any) -> dict[str, dict[str, Any]]:
+    from a2ui.core.resolution import ComponentContext, GenericBinder
+
+    resolved: dict[str, dict[str, Any]] = {}
+
+    def _resolve_one(comp_id: str, data_path: str, instance_key: str) -> None:
+        if instance_key in resolved:
+            return
+        comp = surface.components_model.get(comp_id)
+        if not comp:
+            return
+        ctx = ComponentContext.from_surface(
+            surface, comp_id, data_model_base_path=data_path
+        )
+        binder = GenericBinder(ctx)
+        props = dict(binder.current_props)
+        binder.dispose()
+
+        for _, p_val in list(props.items()):
+            if isinstance(p_val, dict) and "componentId" in p_val and "path" in p_val:
+                tpl_comp_id = p_val["componentId"]
+                tpl_path = ctx.data_context.resolve_path(p_val["path"])
+                arr = surface.data_model.get(tpl_path)
+                if isinstance(arr, list):
+                    base_tpl_path = tpl_path.rstrip("/")
+                    for i in range(len(arr)):
+                        scoped_path = f"{base_tpl_path}/{i}"
+                        _resolve_one(tpl_comp_id, scoped_path, f"{tpl_comp_id}_{i}")
+                        _resolve_one(
+                            tpl_comp_id, scoped_path, f"{tpl_comp_id}-[{scoped_path}]"
+                        )
+
+        parts = [p for p in data_path.strip("/").split("/") if p]
+        idx_suffix = parts[-1] if parts and parts[-1].isdigit() else None
+        if idx_suffix is not None:
+            known_ids = set(surface.components_model.keys)
+            for child_id, _ in comp.get_child_references(known_ids):
+                _resolve_one(child_id, data_path, f"{child_id}_{idx_suffix}")
+                _resolve_one(child_id, data_path, f"{child_id}-[{data_path}]")
+
+        resolved[instance_key] = {
+            "type": comp.type,
+            "props": props,
+        }
+
+    for comp_id, _ in list(surface.components_model.entries):
+        _resolve_one(comp_id, "/", comp_id)
+
+    return resolved
+
+
+def _assert_expected_surface_state(
+    processor: MessageProcessor, expected: dict[str, Any]
+) -> None:
+    if "surfaces" in expected:
+        for s_id, s_exp in expected["surfaces"].items():
+            surface = processor.model.get_surface(s_id)
+            if s_exp.get("exists") is False:
+                assert surface is None
+                continue
+            assert surface is not None
+            if "theme" in s_exp:
+                assert surface.theme == s_exp["theme"]
+            if "sendDataModel" in s_exp:
+                assert surface.send_data_model == s_exp["sendDataModel"]
+            if "dataModel" in s_exp:
+                assert surface.data_model.get("/") == s_exp["dataModel"]
+            if "components" in s_exp:
+                comps_expected = s_exp["components"]
+                if isinstance(comps_expected, dict):
+                    comp_items = list(comps_expected.items())
+                elif isinstance(comps_expected, list):
+                    comp_items = [
+                        (c.get("id"), c) for c in comps_expected if isinstance(c, dict)
+                    ]
+                else:
+                    comp_items = []
+                resolved_nodes = _resolve_surface_components(surface)
+                for c_id, c_exp in comp_items:
+                    comp = surface.components_model.get(c_id)
+                    node_info = resolved_nodes.get(c_id)
+                    assert (
+                        comp is not None or node_info is not None
+                    ), f"Component '{c_id}' missing from surface '{s_id}'"
+                    if isinstance(c_exp, dict):
+                        c_type = (
+                            comp.type
+                            if comp
+                            else (node_info["type"] if node_info else "")
+                        )
+                        if "component" in c_exp:
+                            assert c_type == c_exp["component"]
+                        if node_info:
+                            node_props = node_info["props"]
+                            for p_key, p_val in c_exp.items():
+                                if p_key in ("id", "component"):
+                                    continue
+                                raw_val = node_props.get(p_key)
+                                if isinstance(raw_val, list):
+                                    norm_val = [
+                                        (
+                                            item.component_id
+                                            if hasattr(item, "component_id")
+                                            else item
+                                        )
+                                        for item in raw_val
+                                    ]
+                                elif hasattr(raw_val, "component_id"):
+                                    norm_val = raw_val.component_id
+                                else:
+                                    norm_val = raw_val
+                                assert str(norm_val) == str(p_val), (
+                                    f"Property '{p_key}' mismatch on component"
+                                    f" '{c_id}': got {norm_val}, expected"
+                                    f" {p_val}"
+                                )
+
+                if isinstance(comps_expected, list) and all(
+                    surface.components_model.get(c_id) is not None
+                    for c_id, _ in comp_items
+                ):
+                    assert len(surface.components_model.keys) == len(comp_items), (
+                        f"Surface '{s_id}' component count mismatch: expected"
+                        f" {len(comp_items)}, got"
+                        f" {len(surface.components_model.keys)}"
+                    )
+
+            if "validationResult" in s_exp:
+                resolved_nodes = _resolve_surface_components(surface)
+                val_res_exp = s_exp["validationResult"]
+                for c_id, exp_vr in val_res_exp.items():
+                    node_info = resolved_nodes.get(c_id)
+                    assert (
+                        node_info is not None
+                    ), f"Component node '{c_id}' missing from surface '{s_id}'"
+                    node_props = node_info["props"]
+                    vr = node_props.get("validationResult")
+                    assert vr == exp_vr, (
+                        f"ValidationResult mismatch for '{c_id}': got {vr}, expected"
+                        f" {exp_vr}"
+                    )
+
+
+def validate_pure_validation_case(case: dict[str, Any]) -> None:
+    catalogs = get_catalogs_for_test_case(case)
+    val_config = STRICT_VALIDATION
+    processor = MessageProcessor(
+        catalogs, options=MessageProcessorOptions(validation_config=val_config)
+    )
+
+    steps = case.get("steps")
+    if not steps:
+        steps = [case]
+
+    for idx, step in enumerate(steps):
+        messages = step.get("messages") or step.get("payload")
+        if not messages and "message" in step:
+            messages = [step["message"]]
+        if not messages:
+            continue
+
+        expect_error = step.get("expectError") or (
+            case.get("expectError") if idx == len(steps) - 1 else None
+        )
+
+        if expect_error:
+            with assert_raises(expect_error):
+                errors = []
+                for s in processor.model.surfaces.values():
+                    s.on_error.subscribe(lambda err: errors.append(err))
+                processor.process_messages(messages)
+                for s in processor.model.surfaces.values():
+                    s.on_error.subscribe(lambda err: errors.append(err))
+                    _resolve_surface_components(s)
+                if errors:
+                    err = errors[0]
+                    raise A2uiValidationError(err.get("message", "Expression error"))
+        else:
+            processor.process_messages(messages)
+            expected = step.get("expect")
+            if not expected and idx == len(steps) - 1:
+                expected = case.get("expect")
+            if expected:
+                _assert_expected_surface_state(processor, expected)
+
+
+def validate_process_messages_case(case: dict[str, Any]) -> None:
+    catalogs = get_catalogs_for_test_case(case)
+    is_strict = bool(
+        case.get("strictMode")
+        or case.get("strict_mode")
+        or case.get("options", {}).get("strict_mode")
+    )
+    val_config = STRICT_VALIDATION if is_strict else None
+    processor = MessageProcessor(
+        catalogs, options=MessageProcessorOptions(validation_config=val_config)
+    )
+
+    messages = case.get("messages") or (
+        [case["payload"]] if "payload" in case else None
+    )
+    expect_error = case.get("expectError")
+
+    if messages:
+        if expect_error:
+            with assert_raises(expect_error):
+                processor.process_messages(messages)
+        else:
+            processor.process_messages(messages)
+            expected = case.get("expect", {})
+            _assert_expected_surface_state(processor, expected)
+        return
+
+    steps = case.get("steps", [])
+    for step in steps:
+        messages = step.get("messages") or step.get("payload")
+        if not messages and "message" in step:
+            messages = [step["message"]]
+        if not messages:
+            continue
+
+        expect_error = step.get("expectError") or (
+            case.get("expectError") if step is steps[-1] else None
+        )
+
+        if expect_error:
+            with assert_raises(expect_error):
+                processor.process_messages(messages)
+        else:
+            processor.process_messages(messages)
+            expected = step.get("expect") or (
+                case.get("expect") if step is steps[-1] else {}
+            )
+            _assert_expected_surface_state(processor, expected)
+
+
+def validate_capabilities_case(case: dict[str, Any]) -> None:
+    catalogs = get_catalogs_for_test_case(case)
+    processor = MessageProcessor(catalogs)
+    args = case.get("args") or {}
+    raw_versions = args.get("versions") or (
+        [args["version"]]
+        if "version" in args
+        else [resolve_protocol_version(case) or "v0.9"]
+    )
+    p_versions = [
+        ProtocolVersion(v) if v in ProtocolVersion._value2member_map_ else v
+        for v in raw_versions
+    ]
+    opts = CapabilitiesOptions(
+        versions=p_versions,
+        include_inline_catalogs=bool(args.get("includeInlineCatalogs", False)),
+        component_envelope_ref=args.get(
+            "componentEnvelopeRef", "common_types.json#/$defs/ComponentCommon"
+        ),
+    )
+    caps = processor.get_renderer_capabilities(opts)
+    expected = case.get("expect", {})
+    assert caps == expected
+
+
+def _collect_refs(node: Any) -> list[str]:
+    """Every `$ref` value in a schema, in document order."""
+    if isinstance(node, dict):
+        refs = [node["$ref"]] if isinstance(node.get("$ref"), str) else []
+        for value in node.values():
+            refs.extend(_collect_refs(value))
+        return refs
+    if isinstance(node, list):
+        return [ref for item in node for ref in _collect_refs(item)]
+    return []
+
+
+def _assert_self_contained(schema: dict[str, Any]) -> None:
+    """Asserts that every `$ref` in the schema resolves within the schema."""
+    refs = _collect_refs(schema)
+    assert refs, "Catalog schema contains no references at all."
+    for ref in refs:
+        assert ref.startswith("#"), f"Reference '{ref}' leaves the catalog document."
+        target: Any = schema
+        for token in ref[1:].split("/")[1:]:
+            token = token.replace("~1", "/").replace("~0", "~")
+            assert (
+                isinstance(target, dict) and token in target
+            ), f"Reference '{ref}' does not resolve within the catalog document."
+            target = target[token]
+
+
+# The `expect` keys a from_json case may use (FromJsonExpect in
+# conformance/conformance_schema.json). An unknown key fails the case rather
+# than being silently ignored.
+_FROM_JSON_EXPECT_KEYS = frozenset({
+    "catalogId",
+    "components",
+    "functions",
+    "invalidComponents",
+    "protocolVersion",
+    "selfContained",
+    "theme",
+    "validComponents",
+})
+
+
+def validate_from_json_case(case: dict[str, Any]) -> None:
+    c_path = case.get("catalogPath")
+    if c_path:
+        full_p = os.path.abspath(os.path.join(CONFORMANCE_ROOT, "../", c_path))
+        with open(full_p, "r", encoding="utf-8") as f:
+            c_schema = json.load(f)
+    else:
+        c_schema = (
+            case.get("catalogSchema")
+            or case.get("catalog")
+            or case.get("schema")
+            or case
+        )
+    c_id = resolve_catalog_id(case) or (c_schema.get("catalogId") if c_path else None)
+    p_ver = resolve_protocol_version(case)
+    expect_err = case.get("expectError")
+
+    if expect_err:
+        with assert_raises(expect_err):
+            Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver)
+    else:
+        cat = Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver)
+        expected = case.get("expect", {})
+        unknown_keys = set(expected) - _FROM_JSON_EXPECT_KEYS
+        assert (
+            not unknown_keys
+        ), f"Unknown from_json expect keys: {sorted(unknown_keys)}"
+        if "catalogId" in expected:
+            assert cat.catalog_id == expected["catalogId"]
+        if "protocolVersion" in expected:
+            assert cat.protocol_version == expected["protocolVersion"]
+        if "components" in expected:
+            if isinstance(expected["components"], list):
+                for comp_name in expected["components"]:
+                    assert cat.get_component(comp_name) is not None
+            elif isinstance(expected["components"], dict):
+                for comp_name in expected["components"]:
+                    assert cat.get_component(comp_name) is not None
+        if "functions" in expected:
+            if isinstance(expected["functions"], list):
+                for fn_name in expected["functions"]:
+                    assert cat.get_function(fn_name) is not None
+        if expected.get("selfContained"):
+            _assert_self_contained(cat.catalog_schema)
+        if "validComponents" in expected or "invalidComponents" in expected:
+            validator = PayloadValidator(cat)
+            for component in expected.get("validComponents", []):
+                validator.validate_component(component)
+            for component in expected.get("invalidComponents", []):
+                with pytest.raises(A2uiValidationError):
+                    validator.validate_component(component)
+
+
+def consolidate_spec_catalog(catalog_path: str, common_types_path: str) -> Any:
+    """Returns the expected schema of an `expectCatalog` case.
+
+    Every `$ref` into another document becomes local, and the common types
+    defs the catalog references, transitively, are added to its `$defs`. The
+    catalog's own defs win on a name clash. Top-level metadata keywords that
+    `Catalog.catalog_schema` does not emit (`$id`, `title`, `description`,
+    `protocolVersion`) are dropped.
+    """
+
+    def load(path: str) -> Any:
+        full_path = os.path.join(CONFORMANCE_ROOT, "..", path)
+        with open(full_path, "r", encoding="utf-8") as f:
+            return localize(json.load(f))
+
+    def localize(node: Any) -> Any:
+        if isinstance(node, list):
+            return [localize(item) for item in node]
+        if not isinstance(node, dict):
+            return node
+        return {
+            key: (
+                "#" + value.split("#", 1)[1]
+                if key == "$ref" and isinstance(value, str) and "#/" in value
+                else localize(value)
+            )
+            for key, value in node.items()
+        }
+
+    def refs(node: Any) -> set[str]:
+        found: set[str] = set()
+        if isinstance(node, list):
+            for item in node:
+                found |= refs(item)
+        elif isinstance(node, dict):
+            ref = node.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                found.add(ref[len("#/$defs/") :])
+            for value in node.values():
+                found |= refs(value)
+        return found
+
+    catalog = load(catalog_path)
+    for key in ("$id", "title", "description", "protocolVersion"):
+        catalog.pop(key, None)
+    common_defs = load(common_types_path)["$defs"]
+    defs = catalog.setdefault("$defs", {})
+    pending = refs(catalog)
+    while pending:
+        name = pending.pop()
+        if name not in defs and name in common_defs:
+            defs[name] = common_defs[name]
+            pending |= refs(defs[name])
+    return catalog
+
+
+def normalize_set_keywords(node: Any) -> Any:
+    """Sorts the values of keywords whose order has no meaning.
+
+    `enum` values and `required` names form sets. The generated models may
+    emit them in another order, for example because `typing` caches `Literal`
+    unions regardless of their values' order.
+    """
+    if isinstance(node, list):
+        return [normalize_set_keywords(item) for item in node]
+    if not isinstance(node, dict):
+        return node
+    normalized = {key: normalize_set_keywords(value) for key, value in node.items()}
+    for keyword in ("enum", "required"):
+        # Inside `properties`, a property with this name holds a schema object.
+        values = normalized.get(keyword)
+        if isinstance(values, list):
+            normalized[keyword] = sorted(values, key=json.dumps)
+    return normalized
+
+
+def sdk_catalog(catalog_id: Any) -> CatalogApi | None:
+    """Returns the SDK's own implementation of a published catalog, if any.
+
+    The SDK implements the basic catalog of each protocol version with
+    generated models. A catalog with any other id has no such implementation.
+    """
+    from a2ui.core.basic_catalog import v0_8, v0_9, v1_0
+
+    for module in (v0_8, v0_9, v1_0):
+        catalog = module.BasicCatalog()
+        if catalog.catalog_id == catalog_id:
+            return catalog
+    return None
+
+
+def validate_catalog_schema_case(case: dict[str, Any]) -> None:
+    p_ver = resolve_protocol_version(case)
+    c_path = case.get("catalogPath") or case.get("catalogFile")
+    if c_path:
+        full_p = os.path.abspath(os.path.join(CONFORMANCE_ROOT, "../", c_path))
+        with open(full_p, "r", encoding="utf-8") as f:
+            c_schema = json.load(f)
+    else:
+        c_schema = (
+            case.get("catalogSchema")
+            or case.get("catalog")
+            or case.get("schema")
+            or case
+        )
+    c_id = (
+        resolve_catalog_id(case)
+        or (c_schema.get("catalogId") if isinstance(c_schema, dict) else None)
+        or "https://a2ui.org/catalogs/basic"
+    )
+    # A published catalog that the SDK implements itself is checked through
+    # that implementation, which builds catalog_schema from its models.
+    cat = sdk_catalog(c_id) if c_path else None
+    if cat is not None:
+        assert cat.protocol_version == p_ver, (
+            f"{c_path} is the SDK's {cat.protocol_version} catalog, but the case"
+            f" sets protocolVersion {p_ver}"
+        )
+    else:
+        expect_err = case.get("expectError")
+        if expect_err:
+            with assert_raises(expect_err):
+                Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver)
+            return
+        cat = Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver)
+
+    if "expectCatalog" in case:
+        spec = case["expectCatalog"]
+        assert normalize_set_keywords(cat.catalog_schema) == normalize_set_keywords(
+            consolidate_spec_catalog(spec["catalogPath"], spec["commonTypesPath"])
+        )
+    elif "expect" in case:
+        assert cat.catalog_schema == case["expect"]
+
+
+def validate_common_types_schema_case(case: dict[str, Any]) -> None:
+    from a2ui.core.catalog import get_common_types_schema_json
+    from a2ui.core.common import to_protocol_version
+
+    generated = json.loads(
+        get_common_types_schema_json(
+            to_protocol_version(resolve_protocol_version(case) or "")
+        )
+    )
+    exp_path = os.path.join(CONFORMANCE_ROOT, "..", case["expectFile"])
+    with open(exp_path, "r", encoding="utf-8") as f:
+        expected = json.load(f)
+    assert json.dumps(generated, indent=2, sort_keys=True) == json.dumps(
+        expected, indent=2, sort_keys=True
+    )
+
+
+def validate_agent_to_renderer_schema_case(case: dict[str, Any]) -> None:
+    from a2ui.core.common import to_protocol_version
+    from a2ui.core.schema import get_agent_to_renderer_schema_json
+
+    generated = json.loads(
+        get_agent_to_renderer_schema_json(
+            to_protocol_version(resolve_protocol_version(case) or "")
+        )
+    )
+    exp_path = os.path.join(CONFORMANCE_ROOT, "..", case["expectFile"])
+    with open(exp_path, "r", encoding="utf-8") as f:
+        expected = json.load(f)
+    assert json.dumps(generated, indent=2, sort_keys=True) == json.dumps(
+        expected, indent=2, sort_keys=True
+    )
+
+
+def validate_common_type_case(case: dict[str, Any]) -> None:
+    from pydantic import TypeAdapter, ValidationError
+
+    from a2ui.core.schema import v0_9 as schema_v0_9, v1_0 as schema_v1_0
+
+    schema_packages = {"v0.9": schema_v0_9, "v0.9.1": schema_v0_9, "v1.0": schema_v1_0}
+    p_ver = resolve_protocol_version(case)
+    assert (
+        p_ver in schema_packages
+    ), f"validate_common_type does not support protocolVersion {p_ver!r}"
+    schema_pkg = schema_packages[p_ver]
+    definition = case["definition"]
+    assert (
+        definition in schema_pkg.COMMON_TYPES_DEFS
+    ), f"'{definition}' is not a common types definition in {p_ver}"
+    adapter: TypeAdapter[Any] = TypeAdapter(schema_pkg.COMMON_TYPES_DEFS[definition])
+
+    for step in case["steps"]:
+        value = step["value"]
+        expect_error = step.get("expectError")
+        if expect_error:
+            with assert_raises(expect_error):
+                try:
+                    adapter.validate_python(value)
+                except ValidationError as exc:
+                    raise A2uiValidationError(str(exc)) from exc
+            continue
+        validated = adapter.validate_python(value)
+        # A valid value serializes back to the same JSON.
+        assert (
+            adapter.dump_python(
+                validated, mode="json", by_alias=True, exclude_unset=True
+            )
+            == value
+        )
+
+
+def validate_resolve_path_case(case: dict[str, Any]) -> None:
+    from a2ui.core.resolution.data_context import DataContext
+    from a2ui.core.state.surface_model import SurfaceModel
+
+    args = case.get("args", {})
+    path = args.get("path", "")
+    context_path = args.get("contextPath") or args.get("context_path")
+    surface = SurfaceModel(surface_id="dummy", default_catalog=basic_catalog)
+    ctx = DataContext(surface=surface, path=context_path or "/")
+    res = ctx.resolve_path(path)
+    expected = case.get("expect")
+    if isinstance(expected, dict) and "result" in expected:
+        assert res == expected["result"]
+    elif expected is not None:
+        assert res == expected
+
+
+def validate_data_model_case(case: dict[str, Any]) -> None:
+    from a2ui.core.state.data_model import DataModel
+
+    initial = case.get("initial")
+    model = DataModel(initial_data=initial)
+
+    class _Observer:
+
+        def __init__(self, path: str):
+            self.path = path
+            self.change_count = 0
+            self.current_value = model.get(path)
+
+        def on_change(self, val: Any) -> None:
+            self.change_count += 1
+            self.current_value = val
+
+    observers: list[_Observer] = []
+    watch_paths = case.get("watch") or []
+    for p in watch_paths:
+        obs = _Observer(p)
+        model.subscribe(p, obs.on_change)
+        observers.append(obs)
+
+    steps = case.get("steps") or []
+    for idx, step in enumerate(steps):
+        for obs in observers:
+            obs.change_count = 0
+
+        expect_err = step.get("expect_error") or step.get("expectError")
+        if expect_err:
+            with assert_raises(expect_err):
+                _apply_data_model_op(model, step)
+            continue
+
+        _apply_data_model_op(model, step)
+
+        if "expect_notified" in step:
+            expected_notified = step["expect_notified"]
+            actual_notified: list[str] = []
+            for obs in observers:
+                for _ in range(obs.change_count):
+                    actual_notified.append(obs.path)
+            assert sorted(actual_notified) == sorted(expected_notified), (
+                f"Step {idx} ({step.get('op')}) expect_notified mismatch: "
+                f"got {actual_notified}, expected {expected_notified}"
+            )
+
+        if "expect_values" in step:
+            expected_values = step["expect_values"]
+            for v_path, exp_val in expected_values.items():
+                obs = next((o for o in observers if o.path == v_path), None)
+                assert (
+                    obs is not None
+                ), f"Path '{v_path}' in expect_values is not watched"
+                assert obs.current_value == exp_val, (
+                    f"Step {idx} ({step.get('op')}) expect_values mismatch for"
+                    f" '{v_path}': got {obs.current_value}, expected {exp_val}"
+                )
+
+    if "expect" in case:
+        expected = case["expect"]
+        assert model.get("/") == expected
+
+
+def _apply_data_model_op(model: Any, step: dict[str, Any]) -> None:
+    op = step.get("op")
+    step_path = step.get("path", "")
+    if op == "get":
+        actual = model.get(step_path)
+        if step.get("expect_absent") is True:
+            assert (
+                actual is None
+            ), f"Expected path '{step_path}' to be absent, got {actual}"
+        if "expect_type" in step:
+            exp_type = step["expect_type"]
+            if exp_type == "list":
+                assert isinstance(
+                    actual, list
+                ), f"Expected path '{step_path}' to be list, got {type(actual)}"
+            elif exp_type == "object":
+                assert isinstance(
+                    actual, dict
+                ), f"Expected path '{step_path}' to be dict, got {type(actual)}"
+        if "expect" in step:
+            assert actual == step["expect"], (
+                f"Get at path '{step_path}' mismatch: got {actual}, expected"
+                f" {step['expect']}"
+            )
+    elif op == "set":
+        model.set(step_path, step.get("value"))
+    elif op == "delete":
+        model.set(step_path, None)
+    elif op == "dispose":
+        model.dispose()
+    else:
+        raise ValueError(f"Unknown data_model op: {op}")
+
+
+def validate_get_renderer_data_model_case(case: dict[str, Any]) -> None:
+    catalogs = get_catalogs_for_test_case(case)
+    processor = MessageProcessor(catalogs)
+    steps = case.get("steps")
+    if steps:
+        for step in steps:
+            msgs = step.get("messages") or step.get("payload")
+            if msgs:
+                processor.process_messages(msgs)
+    else:
+        msgs = case.get("messages") or ([case["payload"]] if "payload" in case else [])
+        if msgs:
+            processor.process_messages(msgs)
+    args = case.get("args") or {}
+    ver = args.get("version") or resolve_protocol_version(case)
+    res = processor.get_renderer_data_model(ver)
+    expected = case.get("expect")
+    if expected is None and "expect" in case:
+        assert res is None
+    elif isinstance(expected, dict):
+        if "data" in expected:
+            assert res == expected["data"]
+        else:
+            assert res == expected
+
+
+def validate_handle_rpc_case(case: dict[str, Any]) -> None:
+    args = case.get("args", {})
+    message = args.get("message")
+    outbound_call = args.get("outboundCall")
+    inbound_response = args.get("inboundResponse")
+    fn_metadata = args.get("functionMetadata", {})
+    user_activation = bool(args.get("userActivationPresent", False))
+
+    from a2ui.core.catalog import Catalog, FunctionImplementation
+
+    funcs: list[FunctionImplementation] = []
+    for fn_name, meta in fn_metadata.items():
+        allowed = meta.get("allowedCallers", "rendererOrAgent")
+        requires_activation = meta.get("requiresUserActivation", False)
+
+        def make_exec(name: str):
+            def execute(fn_args: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
+                if name == "playMedia":
+                    return {"playing": True, "timestamp": 0}
+                elif name == "openExternalUrl":
+                    return {"opened": True}
+                elif name == "syncState":
+                    return None
+                elif name == "failingFunction":
+                    raise Exception("An error occurred during function execution.")
+                elif name == "calculateTax":
+                    amount = (fn_args or {}).get("amount", 0)
+                    return amount * 0.1
+                return None
+
+            return execute
+
+        fn_schema = meta.get("schema") or meta.get("parameters")
+        funcs.append(
+            FunctionImplementation(
+                name=fn_name,
+                return_type=meta.get("returnType", "any"),
+                schema=fn_schema,
+                execute=make_exec(fn_name),
+                allowed_callers=allowed,
+                requires_user_activation=requires_activation,
+            )
+        )
+
+    cat_id = args.get("catalogId")
+    if not cat_id and isinstance(message, dict) and "callRendererFunction" in message:
+        msg_cat_id = (
+            message.get("callRendererFunction", {})
+            .get("callFunction", {})
+            .get("catalogId")
+        )
+        expect_err_msg = (
+            case.get("expect", {})
+            .get("response", {})
+            .get("rendererFunctionResponse", {})
+            .get("error", {})
+            .get("message", "")
+        )
+        if "Catalog not found" not in expect_err_msg:
+            cat_id = msg_cat_id
+    if not cat_id and isinstance(outbound_call, dict):
+        cat_id = outbound_call.get("callFunction", {}).get("catalogId")
+    if not cat_id:
+        cat_id = "basic"
+
+    cat_version = (
+        args.get("catalogVersion")
+        or (case.get("catalog") if isinstance(case.get("catalog"), dict) else {}).get(
+            "protocolVersion"
+        )
+        or case.get("protocolVersion")
+        or "v1.0"
+    )
+
+    cat = Catalog(
+        catalog_id=cat_id,
+        protocol_version=cat_version,
+        components=[],
+        functions=funcs,
+    )
+    processor = MessageProcessor(
+        catalogs=[cat],
+        options=MessageProcessorOptions(outbound_listener=lambda msg: None),
+    )
+
+    if message:
+        expect_dict = case.get("expect", {})
+        expect_err = expect_dict.get("error")
+        if expect_err:
+            from a2ui.core.exceptions import A2uiValidationError
+
+            with pytest.raises(A2uiValidationError) as exc_info:
+                processor.process_messages(message)
+            if "message" in expect_err:
+                assert expect_err["message"] in str(exc_info.value)
+        elif "response" in expect_dict:
+            from a2ui.core.processing import ExecutionContext
+
+            import asyncio
+
+            expect_resp = expect_dict["response"]
+            responses = asyncio.run(
+                processor.process_messages_async(
+                    message,
+                    context=ExecutionContext(is_user_activated=user_activation),
+                )
+            )
+            if expect_resp is None:
+                assert len(responses) == 0
+            else:
+                assert len(responses) == 1
+                actual = responses[0]
+                assert actual.get("version") == expect_resp.get("version")
+                actual_rf = actual.get("rendererFunctionResponse", {})
+                expected_rf = expect_resp.get("rendererFunctionResponse", {})
+                assert actual_rf.get("functionCallId") == expected_rf.get(
+                    "functionCallId"
+                )
+                if "value" in expected_rf:
+                    assert actual_rf.get("value") == expected_rf.get("value")
+                if "error" in expected_rf:
+                    assert actual_rf.get("error", {}).get("code") == expected_rf[
+                        "error"
+                    ].get("code")
+                    if "message" in expected_rf["error"]:
+                        assert expected_rf["error"]["message"] in actual_rf.get(
+                            "error", {}
+                        ).get("message", "")
+
+    if outbound_call and inbound_response:
+        correlated_id = case.get("expect", {}).get("correlatedCallId")
+        assert (
+            inbound_response["agentFunctionResponse"]["functionCallId"] == correlated_id
+        )
+
+        from a2ui.core.rpc import CallOptions
+        from a2ui.core.schema.v1_0.common_types import FunctionCall
+
+        call_fn = outbound_call["callFunction"]
+        call_name = call_fn.get("@call") or call_fn.get("call")
+        fut = processor.call_agent_function(
+            surface_id=outbound_call["surfaceId"],
+            call=FunctionCall(
+                call=call_name,
+                catalogId=call_fn.get("catalogId")
+                or "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+                args=call_fn.get("args"),
+            ),
+            options=CallOptions(
+                function_call_id=outbound_call["functionCallId"],
+                version="v1.0",
+            ),
+        )
+        processor.process_messages(inbound_response)
+        assert fut.done()
+        assert fut.result() == case.get("expect", {}).get("result")
+    elif outbound_call and (
+        case.get("expectError") or case.get("expect", {}).get("error")
+    ):
+        import asyncio
+
+        from a2ui.core.exceptions import A2uiRpcError
+        from a2ui.core.rpc import CallOptions
+        from a2ui.core.schema.v1_0.common_types import FunctionCall
+
+        expected_err = case.get("expectError") or case.get("expect", {}).get("error")
+
+        def _start_call(spec: dict[str, Any]) -> Any:
+            call_fn = spec["callFunction"]
+            call_name = call_fn.get("@call") or call_fn.get("call")
+            return processor.call_agent_function(
+                surface_id=spec["surfaceId"],
+                call=FunctionCall(
+                    call=call_name,
+                    catalogId=call_fn.get("catalogId")
+                    or "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+                    args=call_fn.get("args"),
+                ),
+                options=CallOptions(
+                    function_call_id=spec["functionCallId"],
+                    version="v1.0",
+                    timeout_ms=spec.get("timeoutMs"),
+                ),
+            )
+
+        if "secondOutboundCall" in args:
+
+            async def _expect_duplicate() -> None:
+                # The first call stays pending, so reusing its id must be refused.
+                pending = _start_call(outbound_call)
+                with pytest.raises(A2uiRpcError) as exc_info:
+                    _start_call(args["secondOutboundCall"])
+                assert exc_info.value.code == expected_err.get("code", "DUPLICATE")
+                pending.cancel()
+
+            asyncio.run(_expect_duplicate())
+        elif "timeoutMs" in outbound_call:
+
+            async def _expect_timeout() -> None:
+                # No response arrives, so the handler's timer must reject the future.
+                with pytest.raises(A2uiRpcError) as exc_info:
+                    await _start_call(outbound_call)
+                assert exc_info.value.code == expected_err.get("code", "TIMEOUT")
+
+            asyncio.run(_expect_timeout())
+
+
+def validate_accessibility_check_case(case: dict[str, Any]) -> None:
+    pytest.skip(UNRUNNABLE_SUITES["core/accessibility.yaml"])
+
+
+def validate_select_catalog_case(case: dict[str, Any]) -> None:
+    from a2ui.core.resolution import DataContext
+    from a2ui.core.state import ComponentModel, SurfaceModel
+
+    args = case.get("args", {})
+    surface_args = args.get("surface", {})
+    s_id = surface_args.get("id", "main_surface")
+    default_cat_id = surface_args.get("defaultCatalogId", "basic")
+
+    catalogs_dict: dict[str, CatalogApi] = {}
+    if "catalogs" in args and isinstance(args["catalogs"], dict):
+        for cat_id, cat_def in args["catalogs"].items():
+            p_ver = cat_def.get("protocolVersion", "v1.0")
+            catalogs_dict[cat_id] = Catalog(
+                catalog_id=cat_id,
+                protocol_version=p_ver,
+            )
+    else:
+        for cat_id in surface_args.get("supportedCatalogIds", [default_cat_id]):
+            catalogs_dict[cat_id] = Catalog(
+                catalog_id=cat_id,
+                protocol_version="v1.0",
+            )
+
+    default_cat = catalogs_dict.get(
+        default_cat_id,
+        Catalog(catalog_id=default_cat_id, protocol_version="v1.0"),
+    )
+    surface = SurfaceModel(
+        surface_id=s_id,
+        default_catalog=default_cat,
+        available_catalogs=catalogs_dict,
+    )
+
+    expect_err = case.get("expectError")
+
+    if expect_err:
+        with assert_raises(expect_err):
+            for cat_id, cat in catalogs_dict.items():
+                def_ver = getattr(default_cat, "protocol_version", None)
+                cat_ver = getattr(cat, "protocol_version", None)
+                if def_ver and cat_ver and def_ver != cat_ver:
+                    raise A2uiCatalogError(
+                        f"Protocol version mismatch: cannot mix catalog '{cat_id}'"
+                        f" ({cat_ver}) with surface version {def_ver}."
+                    )
+
+            if "components" in args:
+                for c_id, c_data in args["components"].items():
+                    comp_cat_id = c_data.get("catalogId")
+                    if comp_cat_id:
+                        if comp_cat_id not in catalogs_dict:
+                            raise A2uiCatalogError(
+                                f"Catalog '{comp_cat_id}' is not supported by surface"
+                                f" '{s_id}'."
+                            )
+                        comp_cat = catalogs_dict[comp_cat_id]
+                        def_ver = getattr(default_cat, "protocol_version", None)
+                        cat_ver = getattr(comp_cat, "protocol_version", None)
+                        if def_ver and cat_ver and def_ver != cat_ver:
+                            raise A2uiCatalogError(
+                                f"Component '{c_id}' catalog protocol version {cat_ver}"
+                                " mismatches default catalog protocol version"
+                                f" {def_ver}."
+                            )
+                    else:
+                        comp_cat = default_cat
+
+                    comp_model = ComponentModel(
+                        c_id, c_data.get("component", "Box"), catalog=comp_cat
+                    )
+                    surface.components_model.add_component(comp_model)
+            elif "functionCall" in args:
+                fn_call = args["functionCall"]
+                fn_cat_id = fn_call.get("catalogId")
+                ctx = DataContext(surface=surface, path="/")
+                ctx._execute_function(
+                    fn_call["call"], fn_call.get("args", {}), catalog_id=fn_cat_id
+                )
+    else:
+        if "components" in args:
+            last_selected = None
+            for c_id, c_data in args["components"].items():
+                comp_cat_id = c_data.get("catalogId")
+                if comp_cat_id:
+                    if comp_cat_id not in catalogs_dict:
+                        raise A2uiCatalogError(
+                            f"Catalog '{comp_cat_id}' is not supported by surface"
+                            f" '{s_id}'."
+                        )
+                    comp_cat = catalogs_dict[comp_cat_id]
+                else:
+                    comp_cat = default_cat
+                last_selected = comp_cat.catalog_id
+
+                comp_model = ComponentModel(
+                    c_id, c_data.get("component", "Box"), catalog=comp_cat
+                )
+                surface.components_model.add_component(comp_model)
+
+            if "expectSelected" in case:
+                assert last_selected == case["expectSelected"]
+
+        elif "functionCall" in args:
+            fn_call = args["functionCall"]
+            fn_cat_id = fn_call.get("catalogId")
+            ctx = DataContext(surface=surface, path="/")
+            if fn_cat_id:
+                if fn_cat_id not in catalogs_dict:
+                    raise A2uiCatalogError(f"Catalog not found: {fn_cat_id}")
+                selected = catalogs_dict[fn_cat_id].catalog_id
+            else:
+                selected = surface.default_catalog.catalog_id
+
+            if "expectSelected" in case:
+                assert selected == case["expectSelected"]
+
+
+def validate_parse_expression_template_case(case: dict[str, Any]) -> None:
+    from a2ui.core.expressions.expression_parser import ExpressionParser
+
+    input_str = case.get("input", "")
+    expect_error = case.get("expect_error") or case.get("expectError")
+    parser = ExpressionParser()
+
+    if expect_error:
+        cat = expect_error.get("category", "ParseError")
+        msg = expect_error.get("message")
+        expected_types = CATEGORY_TO_EXCEPTION.get(cat, (A2uiError, ValueError))
+        with pytest.raises(expected_types) as exc_info:
+            parser.parse(input_str)
+        if msg:
+            assert re.search(
+                msg, str(exc_info.value)
+            ), f"Expected message matching '{msg}', got '{exc_info.value}'"
+        return
+
+    result = parser.parse(input_str)
+
+    # Join adjacent literal strings
+    joined: list[Any] = []
+    for part in result:
+        if isinstance(part, str) and joined and isinstance(joined[-1], str):
+            joined[-1] += part
+        else:
+            joined.append(part)
+    joined = [p for p in joined if p != ""]
+
+    expected = case.get("expect", [])
+    assert joined == expected
+
+
+def validate_dispatch_action_case(case: dict[str, Any]) -> None:
+    action_payload = case["actionPayload"]
+    data_model_dict = case.get("dataModel") or {}
+    surface_id = case.get("surfaceId", "main")
+    scope = case.get("scope")
+    expect_dispatched = case.get("expectDispatched")
+    expect_data_model = case.get("expectDataModel")
+    expect_error = case.get("expectError")
+
+    catalogs = get_catalogs_for_test_case(case)
+    default_cat = catalogs[0] if catalogs else v09_catalog
+    data_model = DataModel(data_model_dict)
+    surface = SurfaceModel(
+        surface_id=surface_id,
+        default_catalog=default_cat,
+        data_model=data_model,
+    )
+    dispatched: list[dict[str, Any]] = []
+    surface.on_action.subscribe(lambda evt: dispatched.append(evt))
+
+    context = DataContext(surface=surface, path=scope or "/")
+
+    if expect_error:
+        with assert_raises(expect_error):
+            resolved = context.resolve_action(action_payload)
+            if isinstance(resolved, dict) and (
+                "event" in resolved or "name" in resolved
+            ):
+                surface.dispatch_action(resolved, source_component_id="test_comp")
+    else:
+        resolved = context.resolve_action(action_payload)
+        if isinstance(resolved, dict) and ("event" in resolved or "name" in resolved):
+            surface.dispatch_action(resolved, source_component_id="test_comp")
+
+        if expect_dispatched is not None:
+            assert (
+                len(dispatched) >= 1
+            ), "Expected action to be dispatched, but none was"
+            actual = dispatched[0]
+            if "name" in expect_dispatched:
+                assert actual.get("name") == expect_dispatched["name"]
+            if "context" in expect_dispatched:
+                assert actual.get("context") == expect_dispatched["context"]
+            if "userMessage" in expect_dispatched:
+                assert actual.get("userMessage") == expect_dispatched["userMessage"]
+
+        if expect_data_model is not None:
+            assert data_model.data == expect_data_model
+
+
+def validate_evaluate_function_case(case: dict[str, Any]) -> None:
+    func_name = case["function"]
+    args = case["args"]
+    data_model_dict = case.get("dataModel") or {}
+    locale = case.get("locale", "en-US")
+    expect_error = case.get("expectError") or case.get("expect_error")
+
+    catalogs = get_catalogs_for_test_case(case)
+    default_cat = catalogs[0] if catalogs else v09_catalog
+    data_model = DataModel(data_model_dict)
+    surface = SurfaceModel(
+        surface_id="main",
+        default_catalog=default_cat,
+        data_model=data_model,
+    )
+    surface.locale = locale
+    context = DataContext(surface=surface, path="/")
+
+    def _invoke() -> Any:
+        if (
+            default_cat
+            and hasattr(default_cat, "functions")
+            and func_name in default_cat.functions
+        ):
+            fn = default_cat.functions[func_name]
+            if getattr(fn, "execute_func", None) is not None:
+                return fn.execute_func(args, context)
+            return fn.execute(args, context)
+        return context.resolve_dynamic_value({"call": func_name, "args": args})
+
+    if expect_error:
+        with assert_raises(expect_error):
+            _invoke()
+    else:
+        result = _invoke()
+        expected = case.get("expect")
+        assert result == expected

@@ -2,8 +2,169 @@
 
 ## Unreleased
 
-- Support non-ASCII data model keys in templates.
+- **Breaking:** `UpdateDataModelMessage` adds `hasValue` (defaulting to `true`) so `toJson()` emits `'value': null` for explicit null deletions while `fromJson()` distinguishes an omitted `value` from an explicit `null`.
+- **Breaking:** `SurfaceModel.dispatchAction` records action timestamps in UTC (`DateTime.now().toUtc()`) and `A2uiClientAction.toJson()` serializes timestamps in UTC (`timestamp.toUtc().toIso8601String()`) so serialized timestamps always end with `Z` per RFC 3339.
+- **Breaking:** `A2uiClientError` validates in its constructor (not only in debug assertions) that a `VALIDATION_FAILED` error provides a non-empty `path`, throwing `A2uiValidationError`.
+- `ComponentModel.toJson` writes `id` and `component` after the component's properties, so a property named `id` or `component` no longer replaces the model's own.
+- Added `ValidationResult` and `A2uiReturnType.validationResult` for structured
+  client-side validation outcomes (`valid`, `message`, `code`, `severity`), and
+  exposed `validationResults` alongside `isValid` and `validationErrors` on
+  resolved component properties. `A2uiReturnType.validationResult` is an
+  API-level value; the v0.9 `CommonSchemas.functionCall` wire schema still
+  accepts only the seven v0.9 return types. `ValidationResult.validityOf`
+  exposes the rule the binder uses to read a check result's validity.
+- Fixed `checks` evaluation in `GenericBinder`:
+  - Rules evaluate once during initial binding without a duplicate object-branch
+    pass.
+  - `_subscribe` skips invoking its reactive callback during the initial
+    synchronous pass so rebuilds do not write into stale property maps.
+  - Non-map rule entries emit a `VALIDATION_FAILED` client error on the surface
+    instead of throwing a `TypeError`.
+  - Checkable properties are classified from schema markers or `CheckRule` item
+    structure rather than matching the property name `'checks'`.
+- `ReferenceSchemaReader` resolves external `common_types.json#/$defs/...`
+  pointers against the `common_types.json` document the caller supplies (the
+  embedded v0.9 document by default) so catalogs loaded via `Catalog.fromJson`
+  classify `Checkable`, `DynamicValue`, `Action`, and `ChildList` properties
+  identically to code-constructed catalogs. `extractRefFields` forwards the
+  same optional `commonTypes` document.
+- **Breaking:** Message constructors no longer default `version` to
+  `'v0.9'`; every `AgentToRendererMessage` and `RendererToAgentMessage`
+  subclass takes a required `version`. `A2uiClientAction.fromJson` and
+  `A2uiClientError.fromJson` take a required `protocolVersion`.
+- `A2uiProtocolVersion` adds `v0_9_1` and `v1_0`. `'v0.9.1'` now parses to
+  `v0_9_1` instead of `v0_9`. The enum adds `parse`, `major`, `minor`,
+  `compareTo` and `isAtLeast`. Payload parsers and `PayloadValidator` accept
+  v0.9.1 envelopes where v0.9 is configured, and the reverse.
+  `A2uiRendererCapabilities.forVersion` falls back to a compatible declared
+  version in the same way.
+- Added `isCatalogVersionCompatible` and `compareVersions`, matching the
+  TypeScript and Python SDKs.
+- Added the v1.0 messages `CallRendererFunctionMessage`,
+  `AgentFunctionResponseMessage`, `CallAgentFunctionMessage` and
+  `RendererFunctionResponseMessage`, with `A2uiFunctionResponse` and
+  `A2uiFunctionResponseError` for function results. They are rejected in
+  v0.9 and v0.9.1 envelopes.
+- `CreateSurfaceMessage.catalogId` is optional, as v1.0 allows. The class adds
+  the v1.0 `components`, `dataModel` and `metadata` fields. v1.0 rejects
+  `theme`, and v0.9 rejects the v1.0 fields.
+- `A2uiClientAction` adds `catalogId` and `metadata`.
+- `A2uiClientError` follows the v1.0 rules. `UNALLOWED_PARENT` and
+  `UNALLOWED_CHILD` are path errors like `VALIDATION_FAILED`, and path errors
+  reject extra fields. A generic error names exactly one of `surfaceId` and
+  the new `functionCallId`, and keeps its other fields in
+  `additionalProperties`. `surfaceId` is now nullable.
+- Envelope parsing checks each version's allowed and required keys. It
+  rejects unknown envelope and body keys, an empty `components` list, and a
+  v1.0 `updateDataModel` without `value`. A new oracle test checks the parsers
+  against the specification's envelope schemas.
+- `PayloadValidator.commonTypesFor` throws for v1.0, whose common types this
+  package does not embed yet.
+- Harden `ExpressionParser` to clamp scanner bounds at EOF, reject unclosed
+  string literals and trailing backslashes with `A2uiExpressionError`, accept
+  `@`-prefixed function names (such as `${@index()}` and
+  `${@index(offset: 1)}`), and accept `~0` and `~1` JSON Pointer escapes inside
+  `${}` paths while rejecting malformed `~` escapes and non-leading `@` tokens.
+- Add `DataContext.isDataBinding`, `DataContext.isFunctionCall`, and `DataContext.bindingFor` for protocol-version-aware binding and function-call detection; adapt `FormatStringFunction` parser AST nodes (`@path`/`@call`) in v1.0 mode, pre-build function argument signals outside `computed` in `DataContext.resolveListenable`, skip binding/call validation inside `updateDataModel.value` in `checkPathsAndRecursion`, and report unrecognized or invalid action payloads on `SurfaceModel.onError` with code `INVALID_ACTION`.
+- Add `DataContext.resolveAction` method for resolving dynamic values inside action payloads.
+- Added `actions_conformance_test.dart` running the shared `conformance/core/actions.yaml` suite.
+- `FormatStringFunction` coerces null expression arguments to empty strings and encodes maps and lists as JSON.
+- **Deprecated:** `SchemaCatalog` is renamed `CatalogApi`, matching
+  `ComponentApi` and `FunctionApi`. `SchemaCatalog` stays as a deprecated alias
+  and will be removed in a later release.
+- Support reserved protocol key prefix (`@path`, `@call`) in `DataBinding` and `FunctionCall`, dynamic prefix doubling unescaping (`@@path` → `@path`) during dynamic evaluation, and `@path` in dynamic setter generation.
+- Lower SDK floor constraint to `">=3.5.0 <4.0.0"` (replacing post-3.5 null-aware collection element syntax with collection-if) to support Flutter 3.24+ and Dart 3.5+ environments.
+- Execute `functionCall` and `call` component actions locally in
+  `GenericBinder`, against the component's data context. A function that
+  throws, fails asynchronously or is missing from the catalog is reported
+  through `SurfaceModel.onError` with code `EXECUTION_ERROR` rather than
+  escaping the action callback.
+- **Behavior change:** `SurfaceModel.dispatchAction` only emits agent-bound
+  `event` and `name` actions. A direct caller that passes a `functionCall`
+  payload previously had the function run against the root data context; the
+  call is now ignored. Run local functions through the binder or
+  `DataContext.resolveSync` instead.
+- Action `context` values are resolved one entry at a time, so a context key
+  named `path` or `call` reaches the agent as a literal key instead of being
+  read as a data binding or function call.
+- Added optional `userMessage` field to `A2uiClientAction`.
 - Remove `A2uiCompileError` from `a2ui_core` (compilation is an agent SDK responsibility).
+- `ExpressionParser` accepts number literals with a leading decimal point
+  (`.5`, `-.5`, `+.5`, `.5e2`), including as function-call arguments. A `.`
+  inside a path such as `a.5` is still part of the path, and `.foo` is still a
+  path. This matches the TypeScript, Python and Swift parsers.
+- `ExpressionParser` rejects a number literal outside the double range, such as
+  `1e999`, with `A2uiExpressionError`. It used to return `double.infinity`,
+  which `jsonEncode` can't encode.
+- `MessageProcessor`, `PayloadValidator`, and `Catalog` align surface lifecycle
+  error reporting (`A2uiIntegrityError` and `A2uiRecursionError` extending
+  `A2uiValidationError`, per-message completeness validation, safe no-op
+  `deleteSurface` on unknown surfaces), support `"v0.9.1"` in
+  `A2uiProtocolVersion.tryParse`, and pass the `message_processor_v0_9.yaml`,
+  `validator_v0_9.yaml`, and `catalog.yaml` conformance suites.
+- `ExpressionParser` enforces recursion depth (`maxDepth = 100`), template
+  length (`maxTemplateLength = 10000`), and template parts
+  (`maxTemplateParts = 1000`) limits across nested interpolations and
+  function arguments.
+- `DataModel` and `DataContext` enforce JSON Pointer validation (`A2uiDataError`
+  on non-pointer paths, forbidden prototype-pollution segments, primitive
+  traversal/root mutation, and array index bounds), support `DataContext.index`
+  and `DataContext.dispose`, and pass the `data_model.yaml` and
+  `data_context.yaml` conformance suites.
+- **Breaking:** `GenericBinder`, `Behavior`, `BehaviorNode` and `ComponentContext`
+  are no longer exported. Renderers read components through `NodeResolver` and
+  `ComponentNode`, whose props carry dynamic properties as `ResolvedBinding`
+  values instead of raw values, with no synthesized `set<Property>` setter
+  entries. A property bound to a data path is a `WritableBinding`, even when the
+  path holds no data; writes go through `WritableBinding.set`, and
+  `WritableBinding.path` is the path as authored.
+- **Breaking:** `SurfaceModel.dispatchAction` no longer executes `functionCall`
+  payloads and emits an action only for `event` payloads. A node's action runs
+  its function call itself.
+- Added: `DataContext` accepts an optional `ExpressionErrorReporter` through
+  `onError`. With a reporter, a missing or failing catalog function resolves to
+  null and the reporter receives the error; without one, the error propagates.
+- Added: `NodeResolver(surface)` builds a reactive tree of read-only
+  `ComponentNode`s with resolved child references, scoped templates, dynamic
+  bindings, callable actions, and placeholder states for unresolved nodes.
+  It owns node subscriptions and cleanup; consumers dispose the resolver
+  before its surface. Node props and container-valued bindings are detached,
+  recursively unmodifiable snapshots.
+- Node bindings report a missing or failing catalog function as an
+  `EXPRESSION_ERROR` client error on the surface and resolve to null.
+- Validation and node resolution recognize wire/local `$ref` pointers and
+  `REF:` description markers. Resolution additionally recognizes unmarked
+  structural `ChildList` schemas, which validation deliberately ignores so a
+  batch is never rejected on that guess. Resolution mounts top-level child
+  references and lists, including single-reference fields within arrays of
+  objects.
+- A `ChildList` expands to at most `maxDynamicChildListSize` (10,000) items,
+  matching the TypeScript core's `MAX_DYNAMIC_CHILD_LIST_SIZE`.
+- Changed: `ChildNode` descriptors compare by component id and data scope
+  and serialize as plain JSON in node props. Nested `ChildList` values remain
+  scoped descriptors rather than mounted nodes.
+- Fixed: `DataContext.resolveListenable` resolves array and map payloads per
+  entry and tracks nested bindings reactively; previously a container holding
+  bindings (such as a function argument list or a nested `{path}` value) was
+  passed through as a static literal.
+  > > > > > > > upstream/main
+
+## 0.2.2
+
+- `ExpressionParser` accepts signed number literals (`-42`, `+1`, `-3.5`) and
+  exponent notation (`1e5`, `1E5`, `1.5e-3`, `2.5E+4`), including as
+  function-call arguments. Previously `-42` parsed as the path `-42` and `1e5`
+  failed with `Unexpected characters at end of expression`. A `-` inside a path
+  such as `a-1` is still part of the path. This matches the TypeScript and
+  Python parsers.
+- Fixed `DataModel.set` with a `null` value (a delete) at a list index at or
+  past the end of the list padding the list with `null` up to that index. It
+  now leaves the list unchanged; only a write extends a list.
+- Remove `A2uiCompileError` from `a2ui_core` (compilation is an agent SDK responsibility).
+- Validate that catalog function definitions have a non-empty `name` string in `Catalog.fromJson`, throwing `A2uiCatalogError` if missing or empty.
+- Validate that message object fields and `theme` maps have string keys in `AgentToRendererMessage.fromJson`, throwing `A2uiValidationError` when encountering non-string keys.
+- Enhanced child reference detection in `ComponentRefs` to recognize string-typed `child` properties and string list `children` properties as component references.
+- Expanded conformance test coverage for validator, expressions, and data model suites across protocol versions v0.8, v0.9, and v1.0.
 
 ## 0.2.1
 
@@ -141,8 +302,8 @@
   than `A2uiStateError` for a `createSurface` naming a catalog it does not
   support, which is what the blueprint's validation matrix calls for.
 - `MessageProcessor` and `DataModel` are exercised by the shared
-  `conformance/core/validator.yaml` and `conformance/core/data_model.yaml`
-  suites.
+  `conformance/core/validator_v0_8.yaml`, `validator_v0_9.yaml`,
+  `validator_v1_0.yaml` and `conformance/core/data_model.yaml` suites.
 
 ## 0.1.1
 

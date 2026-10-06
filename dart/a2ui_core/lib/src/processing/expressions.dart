@@ -12,13 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:math' as math;
+
 import '../primitives/errors.dart';
 
-/// Digits, an optional decimal point, and optional further digits.
+/// An optional sign, a mantissa, and an optional exponent (`e` or `E`, an
+/// optional sign, digits).
 ///
-/// Every client implementation accepts a trailing point (`1.`) today and none
+/// The mantissa is either digits with an optional decimal point and further
+/// digits (`5`, `5.`, `5.25`), or a decimal point followed by digits (`.5`).
+/// Every client implementation accepts a trailing point (`1.`) and none
 /// accepts a second point (`1.2.3`), so the grammar is written to keep that.
-final RegExp _numberLiteral = RegExp(r'^\d+\.?\d*$');
+///
+/// Every engine checks the same pattern: `NUMBER_LITERAL` in TypeScript,
+/// `_NUMBER_LITERAL` in Python, and `ExpressionParser.numberLiteralPattern` in
+/// Swift.
+final RegExp _numberLiteral = RegExp(
+  r'^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$',
+);
 
 /// A parser for A2UI expressions, supporting string interpolation
 /// and function calls.
@@ -31,11 +42,23 @@ class ExpressionParser {
   /// this parser can be driven into by an agent-supplied template.
   static const int maxDepth = 100;
 
+  /// The maximum allowed length for expression template strings.
+  static const int maxTemplateLength = 10000;
+
+  /// The maximum allowed number of parts in an expression template.
+  static const int maxTemplateParts = 1000;
+
   /// Parses an input string into a list of components (literals or
   /// [Map] representations of expressions).
   List<Object?> parse(String input, [int depth = 0]) {
     if (depth > maxDepth) {
       throw A2uiExpressionError('Max recursion depth reached in parse');
+    }
+    if (input.length > maxTemplateLength) {
+      throw A2uiExpressionError(
+        'Expression template length (${input.length}) exceeds maximum limit '
+        '($maxTemplateLength)',
+      );
     }
     if (!input.contains('\${')) {
       return [input];
@@ -45,11 +68,18 @@ class ExpressionParser {
     final scanner = _Scanner(input);
 
     while (!scanner.isAtEnd) {
+      if (parts.length >= maxTemplateParts) {
+        throw A2uiExpressionError(
+          'Expression parts count exceeds maximum limit ($maxTemplateParts)',
+        );
+      }
       if (scanner.matches('\${')) {
         scanner.advance(2);
         final String content = _extractInterpolationContent(scanner);
         final Object? parsed = parseExpression(content, depth + 1);
-        parts.add(parsed);
+        if (parsed != null) {
+          parts.add(parsed);
+        }
       } else if (scanner.matches('\\\${')) {
         scanner.advance(1); // skip \
         final int start = scanner.pos;
@@ -91,13 +121,27 @@ class ExpressionParser {
         braceBalance--;
       } else if (char == "'" || char == '"') {
         final quote = char;
+        var closed = false;
         while (!scanner.isAtEnd) {
           final String c = scanner.advance();
           if (c == '\\') {
+            if (scanner.isAtEnd) {
+              throw A2uiExpressionError(
+                'Unclosed string literal in unclosed interpolation: '
+                'trailing backslash before end of input',
+              );
+            }
             scanner.advance();
           } else if (c == quote) {
+            closed = true;
             break;
           }
+        }
+        if (!closed) {
+          throw A2uiExpressionError(
+            'Unclosed string literal in unclosed interpolation: '
+            'missing $quote',
+          );
         }
       }
     }
@@ -144,7 +188,7 @@ class ExpressionParser {
     if (scanner.peek() == "'" || scanner.peek() == '"') {
       return _parseStringLiteral(scanner);
     }
-    if (_isDigit(scanner.peek())) {
+    if (_isNumberStart(scanner)) {
       return _parseNumberLiteral(scanner);
     }
     if (scanner.matchesKeyword('true')) return true;
@@ -156,8 +200,17 @@ class ExpressionParser {
     scanner.skipWhitespace();
 
     if (scanner.peek() == '(') {
+      if (token.contains('~')) {
+        throw A2uiExpressionError(
+          "Invalid function name '$token': '~' is not allowed in function "
+          'names',
+        );
+      }
       return _parseFunctionCall(token, scanner, depth);
     } else {
+      if (token.startsWith('@')) {
+        throw A2uiExpressionError("Expected '(' after function name '$token'");
+      }
       if (token.isEmpty) return '';
       return {'path': token};
     }
@@ -165,10 +218,38 @@ class ExpressionParser {
 
   String _scanPathOrIdentifier(_Scanner scanner) {
     final int start = scanner.pos;
+    if (scanner.peek() == '@') {
+      final String next = scanner.peek(1);
+      if (!_isAlpha(next) && next != '_') {
+        throw A2uiExpressionError(
+          "Invalid identifier starting with '@' in expression",
+        );
+      }
+      scanner.advance();
+      while (!scanner.isAtEnd) {
+        final String c = scanner.peek();
+        if (_isAlnum(c) || c == '_') {
+          scanner.advance();
+        } else {
+          break;
+        }
+      }
+      return scanner.input.substring(start, scanner.pos);
+    }
+
     while (!scanner.isAtEnd) {
       final String c = scanner.peek();
       if (_isIdContinue(c) || c == '/' || c == '.' || c == '-') {
         scanner.advance();
+      } else if (c == '~') {
+        final String next = scanner.peek(1);
+        if (next != '0' && next != '1') {
+          throw A2uiExpressionError(
+            "Invalid escape sequence '~${next.isEmpty ? '' : next}' in path: "
+            "expected '~0' or '~1'",
+          );
+        }
+        scanner.advance(2);
       } else {
         break;
       }
@@ -224,6 +305,11 @@ class ExpressionParser {
     while (!scanner.isAtEnd) {
       final String c = scanner.advance();
       if (c == '\\') {
+        if (scanner.isAtEnd) {
+          throw A2uiExpressionError(
+            'Unclosed string literal: trailing backslash before end of input',
+          );
+        }
         final String next = scanner.advance();
         if (next == 'n') {
           result.write('\n');
@@ -235,27 +321,82 @@ class ExpressionParser {
           result.write(next);
         }
       } else if (c == quote) {
-        break;
+        return result.toString();
       } else {
         result.write(c);
       }
     }
-    return result.toString();
+    throw A2uiExpressionError('Unclosed string literal: missing $quote');
+  }
+
+  /// Whether the scanner is at the start of a number literal: a digit, a `.`
+  /// followed by a digit, or a `-` or `+` sign followed by either of those.
+  ///
+  /// The grammar has no arithmetic operators, so a sign here can only belong
+  /// to a literal. A `-` or `.` inside a path such as `a-1` or `a.5` never
+  /// reaches this check, because the path scanner consumes it as part of the
+  /// token.
+  bool _isNumberStart(_Scanner scanner) {
+    final String first = scanner.peek();
+    final offset = first == '-' || first == '+' ? 1 : 0;
+    if (_isDigit(scanner.peek(offset))) return true;
+    return scanner.peek(offset) == '.' && _isDigit(scanner.peek(offset + 1));
   }
 
   num _parseNumberLiteral(_Scanner scanner) {
     final int start = scanner.pos;
-    while (!scanner.isAtEnd &&
-        (_isDigit(scanner.peek()) || scanner.peek() == '.')) {
+    if (scanner.peek() == '-' || scanner.peek() == '+') {
       scanner.advance();
     }
+    // Consume every dot, so `_numberLiteral` reports `1.2.3` as an invalid
+    // number literal rather than leaving `.3` as trailing characters.
+    while (_isDigit(scanner.peek()) || scanner.peek() == '.') {
+      scanner.advance();
+    }
+    _skipExponent(scanner);
     final String text = scanner.input.substring(start, scanner.pos);
     // The grammar is spelled out here rather than delegated to the platform's
     // number parser, so that every implementation accepts the same literals.
     if (!_numberLiteral.hasMatch(text)) {
       throw A2uiExpressionError("Invalid number literal: '$text'");
     }
-    return num.parse(text);
+    final num value = num.parse(text);
+    if (!value.isFinite) {
+      throw A2uiExpressionError("Number literal is out of range: '$text'");
+    }
+    return value;
+  }
+
+  /// Consumes an exponent suffix (`e` or `E`, an optional sign, then digits)
+  /// if one is present.
+  ///
+  /// A malformed exponent such as `1e` or `1e+` is still consumed, so that
+  /// [_parseNumberLiteral] reports it as an invalid literal instead of leaving
+  /// trailing characters behind.
+  void _skipExponent(_Scanner scanner) {
+    if (scanner.peek() != 'e' && scanner.peek() != 'E') return;
+    scanner.advance();
+    if (scanner.peek() == '+' || scanner.peek() == '-') {
+      scanner.advance();
+    }
+    while (_isDigit(scanner.peek())) {
+      scanner.advance();
+    }
+  }
+
+  bool _isAlpha(String c) {
+    if (c.isEmpty) return false;
+    final int u = c.codeUnitAt(0);
+    return (u >= 0x41 && u <= 0x5A) || // A-Z
+        (u >= 0x61 && u <= 0x7A); // a-z
+  }
+
+  bool _isAlnum(String c) {
+    if (c.isEmpty) return false;
+    final int u = c.codeUnitAt(0);
+    return (u >= 0x30 && u <= 0x39) || // 0-9
+        (u >= 0x41 && u <= 0x5A) || // A-Z
+        (u >= 0x61 && u <= 0x7A); // a-z
   }
 
   bool _isDigit(String c) {
@@ -289,9 +430,8 @@ class _Scanner {
     final int targetPos = pos + offset;
     if (targetPos >= input.length) return '';
 
-    final int endPos = targetPos + 2 <= input.length
-        ? targetPos + 2
-        : input.length;
+    final int endPos =
+        targetPos + 2 <= input.length ? targetPos + 2 : input.length;
 
     // Safely extract the full 32-bit code point
     final int codePoint = input.substring(targetPos, endPos).runes.first;
@@ -302,9 +442,10 @@ class _Scanner {
 
   String advance([int? count]) {
     final int step = count ?? (peek().isEmpty ? 1 : peek().length);
-    final String result = input.substring(pos, pos + step);
-    pos += step;
-    return result;
+    final int start = math.min(pos, input.length);
+    final int end = math.min(pos + step, input.length);
+    pos = end;
+    return input.substring(start, end);
   }
 
   bool match(String expected) {
