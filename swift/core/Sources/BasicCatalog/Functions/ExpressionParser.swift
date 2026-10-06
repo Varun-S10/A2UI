@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import A2UICore
+import Foundation
 import OrderedCollections
 import OrderedJSON
 
@@ -22,22 +23,61 @@ import OrderedJSON
 /// items representing literals, data-model paths, and nested function calls.
 public struct ExpressionParser: Sendable {
   /// Maximum recursion depth allowed during expression parsing.
-  public static let maxDepth = 10
+  ///
+  /// Every engine uses the same number: `ExpressionParser.MAX_DEPTH` in
+  /// TypeScript and Python. They must agree, or an expression one engine
+  /// accepts the other rejects.
+  public static let maxDepth = 100
+
+  /// Maximum allowed length for expression template strings.
+  public static let maxTemplateLength = 10_000
+
+  /// Maximum allowed number of parts in an expression template.
+  public static let maxTemplateParts = 1_000
+
+  /// An optional sign, a mantissa (`5`, `5.`, `5.25`, or `.5`), and an optional
+  /// exponent (`e` or `E`, an optional sign, digits). Uses `[0-9]` rather than
+  /// `\d` because ICU's `\d` matches digits from every Unicode script.
+  ///
+  /// Every engine checks the same pattern: `NUMBER_LITERAL` in TypeScript,
+  /// `_NUMBER_LITERAL` in Python, and `_numberLiteral` in Dart.
+  private static let numberLiteralPattern =
+    #"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$"#
+
+  /// Compiled regular expression for `numberLiteralPattern`.
+  private static let numberLiteral = try? NSRegularExpression(pattern: numberLiteralPattern)
 
   public init() {}
 
   /// Parses an input template string into an array of dynamic `JSONValue` parts.
+  ///
+  /// - Parameter input: The raw template string to parse.
+  /// - Returns: An array of `JSONValue` elements (literals, paths, function calls).
+  /// - Throws: `FunctionError` if recursion depth is exceeded or syntax is invalid.
+  public func parse(_ input: String) throws -> [JSONValue] {
+    try parse(input, depth: 0)
+  }
+
+  /// Parses an input template string into an array of dynamic `JSONValue` parts at a specific depth.
   ///
   /// - Parameters:
   ///   - input: The raw template string to parse.
   ///   - depth: The current recursion depth.
   /// - Returns: An array of `JSONValue` elements (literals, paths, function calls).
   /// - Throws: `FunctionError` if recursion depth is exceeded or syntax is invalid.
-  public func parse(_ input: String, depth: Int = 0) throws -> [JSONValue] {
+  package func parse(_ input: String, depth: Int) throws -> [JSONValue] {
     if depth > Self.maxDepth {
       throw FunctionError.executionFailed(
         name: "expressionParser",
         message: "Max recursion depth reached in parse"
+      )
+    }
+    let length = input.count
+    if length > Self.maxTemplateLength {
+      throw FunctionError.executionFailed(
+        name: "expressionParser",
+        message:
+          "Expression template length (\(length)) exceeds maximum limit (\(Self.maxTemplateLength))"
       )
     }
     if input.isEmpty || !input.contains("${") {
@@ -48,6 +88,12 @@ public struct ExpressionParser: Sendable {
     var scanner = Scanner(input)
 
     while !scanner.isAtEnd {
+      if parts.count >= Self.maxTemplateParts {
+        throw FunctionError.executionFailed(
+          name: "expressionParser",
+          message: "Expression parts count exceeds maximum limit (\(Self.maxTemplateParts))"
+        )
+      }
       if scanner.matches("${") {
         scanner.advance(by: 2)
         let content = try extractInterpolationContent(&scanner)
@@ -84,11 +130,21 @@ public struct ExpressionParser: Sendable {
 
   /// Parses a single expression string into a `JSONValue`.
   ///
+  /// - Parameter expr: The expression string (content inside `${...}`).
+  /// - Returns: The parsed `JSONValue`.
+  /// - Throws: `FunctionError` if recursion depth is exceeded or syntax is invalid.
+  public func parseExpression(_ expr: String) throws -> JSONValue {
+    try parseExpression(expr, depth: 0)
+  }
+
+  /// Parses a single expression string into a `JSONValue` at a specific depth.
+  ///
   /// - Parameters:
   ///   - expr: The expression string (content inside `${...}`).
   ///   - depth: The current recursion depth.
   /// - Returns: The parsed `JSONValue`.
-  public func parseExpression(_ expr: String, depth: Int = 0) throws -> JSONValue {
+  /// - Throws: `FunctionError` if recursion depth is exceeded or syntax is invalid.
+  package func parseExpression(_ expr: String, depth: Int) throws -> JSONValue {
     if depth > Self.maxDepth {
       throw FunctionError.executionFailed(
         name: "expressionParser",
@@ -152,6 +208,14 @@ public struct ExpressionParser: Sendable {
   }
 
   private func parseExpressionInternal(_ scanner: inout Scanner, depth: Int) throws -> JSONValue {
+    // Both recursive paths pass through here: interpolations nested inside an interpolation,
+    // and function-call arguments that are themselves expressions. Checking here counts both.
+    if depth > Self.maxDepth {
+      throw FunctionError.executionFailed(
+        name: "expressionParser",
+        message: "Max recursion depth reached in parse"
+      )
+    }
     scanner.skipWhitespace()
     if scanner.isAtEnd {
       return .string("")
@@ -170,10 +234,8 @@ public struct ExpressionParser: Sendable {
     }
 
     // 2. Number literals
-    if let char = scanner.peek() {
-      if char.isNumber || (char == "-" && (scanner.peek(offset: 1)?.isNumber ?? false)) {
-        return parseNumberLiteral(&scanner)
-      }
+    if isNumberStart(scanner) {
+      return try parseNumberLiteral(&scanner)
     }
 
     // 3. Keywords
@@ -184,7 +246,7 @@ public struct ExpressionParser: Sendable {
       return .boolean(false)
     }
     if scanner.matchesKeyword("null") {
-      return .string("")
+      return .null
     }
 
     // 4. Identifiers / Paths / Function calls
@@ -222,7 +284,7 @@ public struct ExpressionParser: Sendable {
       }
       scanner.skipWhitespace()
 
-      let argVal = try parseExpressionInternal(&scanner, depth: depth)
+      let argVal = try parseExpressionInternal(&scanner, depth: depth + 1)
       args[argName] = argVal
 
       scanner.skipWhitespace()
@@ -294,31 +356,81 @@ public struct ExpressionParser: Sendable {
     return result
   }
 
-  private func parseNumberLiteral(_ scanner: inout Scanner) -> JSONValue {
+  /// Whether the scanner is at the start of a number literal: a digit, a `.` followed by a digit,
+  /// or a `-` or `+` sign followed by either of those.
+  ///
+  /// The grammar has no arithmetic operators, so a sign here can only belong to a literal. A `-`
+  /// or `.` inside a path such as `a-1` or `a.5` never reaches this check, because the path
+  /// scanner consumes it as part of the token.
+  private func isNumberStart(_ scanner: Scanner) -> Bool {
+    let first = scanner.peek()
+    let offset = (first == "-" || first == "+") ? 1 : 0
+    if Self.isDigit(scanner.peek(offset: offset)) {
+      return true
+    }
+    return scanner.peek(offset: offset) == "." && Self.isDigit(scanner.peek(offset: offset + 1))
+  }
+
+  /// Scans and validates a number literal against `numberLiteralPattern`.
+  private func parseNumberLiteral(_ scanner: inout Scanner) throws -> JSONValue {
     let start = scanner.pos
-    if scanner.peek() == "-" {
-      _ = scanner.advance(by: 1)
+    if scanner.peek() == "-" || scanner.peek() == "+" {
+      scanner.advance(by: 1)
     }
-    var hasDot = false
-    while !scanner.isAtEnd, let c = scanner.peek() {
-      if c.isNumber {
-        _ = scanner.advance(by: 1)
-      } else if c == "." && !hasDot {
-        hasDot = true
-        _ = scanner.advance(by: 1)
-      } else {
-        break
-      }
+    while let c = scanner.peek(), Self.isDigit(c) || c == "." {
+      scanner.advance(by: 1)
     }
+    skipExponent(&scanner)
     let numStr = String(scanner.input[start..<scanner.pos])
-    if hasDot, let d = Double(numStr) {
-      return .number(d)
-    } else if let i = Int(numStr) {
-      return .integer(i)
-    } else if let d = Double(numStr) {
-      return .number(d)
+    guard Self.isValidNumberLiteral(numStr) else {
+      throw FunctionError.executionFailed(
+        name: "expressionParser",
+        message: "Invalid number literal: '\(numStr)'"
+      )
     }
-    return .string(numStr)
+    let isInteger = !numStr.contains(where: { $0 == "." || $0 == "e" || $0 == "E" })
+    if isInteger, let i = Int(numStr) {
+      return .integer(i)
+    }
+    guard let d = Double(numStr), d.isFinite else {
+      throw FunctionError.executionFailed(
+        name: "expressionParser",
+        message: "Number literal is out of range: '\(numStr)'"
+      )
+    }
+    return .number(d)
+  }
+
+  /// Consumes an exponent suffix (`e` or `E`, an optional sign, then digits)
+  /// if one is present.
+  ///
+  /// A malformed exponent such as `1e` or `1e+` is still consumed, so that
+  /// `parseNumberLiteral` reports it as an invalid literal instead of leaving
+  /// trailing characters behind.
+  private func skipExponent(_ scanner: inout Scanner) {
+    guard let c = scanner.peek(), c == "e" || c == "E" else {
+      return
+    }
+    scanner.advance(by: 1)
+    if let sign = scanner.peek(), sign == "+" || sign == "-" {
+      scanner.advance(by: 1)
+    }
+    while Self.isDigit(scanner.peek()) {
+      scanner.advance(by: 1)
+    }
+  }
+
+  /// Checks whether the entire `text` matches `numberLiteralPattern`.
+  private static func isValidNumberLiteral(_ text: String) -> Bool {
+    let range = NSRange(text.startIndex..., in: text)
+    return numberLiteral?.firstMatch(in: text, range: range)?.range == range
+  }
+
+  /// Whether `c` is an ASCII digit. `Character.isNumber` also accepts non-ASCII numerals such as
+  /// `½`, which no other engine treats as part of a number literal.
+  private static func isDigit(_ c: Character?) -> Bool {
+    guard let c else { return false }
+    return c >= "0" && c <= "9"
   }
 
   // MARK: - Nested Scanner

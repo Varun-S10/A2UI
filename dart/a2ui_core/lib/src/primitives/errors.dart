@@ -26,8 +26,11 @@ class A2uiError implements Exception {
 class A2uiValidationError extends A2uiError {
   final Object? details;
 
-  A2uiValidationError(String message, {this.details})
-    : super(message, 'VALIDATION_ERROR');
+  A2uiValidationError(
+    String message, {
+    this.details,
+    String code = 'VALIDATION_ERROR',
+  }) : super(message, code);
 }
 
 /// Thrown during DataModel mutations (invalid paths, type mismatches).
@@ -43,7 +46,7 @@ class A2uiExpressionError extends A2uiError {
   final Object? details;
 
   A2uiExpressionError(String message, {this.expression, this.details})
-    : super(message, 'EXPRESSION_ERROR');
+      : super(message, 'EXPRESSION_ERROR');
 }
 
 /// Thrown for structural issues in the UI tree (missing surfaces, duplicate
@@ -58,7 +61,7 @@ class A2uiParseError extends A2uiError {
   final String? rawContent;
 
   A2uiParseError(String message, {this.rawContent})
-    : super(message, 'PARSE_ERROR');
+      : super(message, 'PARSE_ERROR');
 }
 
 /// Thrown when a catalog cannot be loaded, parsed, or negotiated.
@@ -67,24 +70,24 @@ class A2uiCatalogError extends A2uiError {
   final String? catalogId;
 
   A2uiCatalogError(String message, {this.catalogId})
-    : super(message, 'CATALOG_ERROR');
+      : super(message, 'CATALOG_ERROR');
 }
 
 /// Thrown for a structurally invalid component graph: unreachable roots,
 /// duplicate ids, dangling references.
-class A2uiIntegrityError extends A2uiError {
+class A2uiIntegrityError extends A2uiValidationError {
   /// The component ids involved, when known.
   final List<String> componentIds;
 
-  A2uiIntegrityError(String message, {this.componentIds = const []})
-    : super(message, 'INTEGRITY_ERROR');
+  A2uiIntegrityError(super.message, {this.componentIds = const []})
+      : super(code: 'INTEGRITY_ERROR');
 }
 
 /// Thrown when a component graph cycles or exceeds the depth cap.
-class A2uiRecursionError extends A2uiError {
+class A2uiRecursionError extends A2uiValidationError {
   /// The chain of component ids that produced the cycle, when known.
   final List<String> cycle;
 
-  A2uiRecursionError(String message, {this.cycle = const []})
-    : super(message, 'RECURSION_ERROR');
+  A2uiRecursionError(super.message, {this.cycle = const []})
+      : super(code: 'RECURSION_ERROR');
 }
