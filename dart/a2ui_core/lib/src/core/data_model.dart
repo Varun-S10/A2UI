@@ -25,6 +25,11 @@ const int maxAutoVivifyIndex = 10000;
 /// A standalone, observable data store representing the client-side state.
 /// It handles JSON Pointer path resolution and reactive signal management.
 class DataModel {
+  static final RegExp _numericIndexPattern = RegExp(r'^(?:0|[1-9]\d*)$');
+
+  static int? _parseListIndex(String segment) =>
+      _numericIndexPattern.hasMatch(segment) ? int.tryParse(segment) : null;
+
   Object? _data;
   final Map<String, WeakReference<Signal<Object?>>> _signals = {};
 
@@ -41,7 +46,7 @@ class DataModel {
       if (currentNode is Map<String, Object?>) {
         currentNode = currentNode[segment];
       } else if (currentNode is List<Object?>) {
-        final int? index = int.tryParse(segment);
+        final int? index = _parseListIndex(segment);
         if (index == null || index < 0 || index >= currentNode.length) {
           return null;
         }
@@ -53,30 +58,59 @@ class DataModel {
     return currentNode;
   }
 
+  bool _hasPath(DataPath dataPath) {
+    if (dataPath.isEmpty) return true;
+    Object? currentNode = _data;
+    for (final String segment in dataPath.segments) {
+      if (currentNode is Map<String, Object?>) {
+        if (!currentNode.containsKey(segment)) return false;
+        currentNode = currentNode[segment];
+      } else if (currentNode is List<Object?>) {
+        final int? index = _parseListIndex(segment);
+        if (index == null || index < 0 || index >= currentNode.length) {
+          return false;
+        }
+        currentNode = currentNode[index];
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+
   /// Updates data at a specific path and notifies subscribers.
   void set(String path, Object? value) {
     final dataPath = DataPath.parse(path);
+    if (!dataPath.isEmpty && value == null && !_hasPath(dataPath)) {
+      return;
+    }
 
     batch(() {
       if (dataPath.isEmpty) {
-        _data = value;
+        _data = value ?? <String, Object?>{};
       } else {
+        if (_data != null && _data is! Map && _data is! List) {
+          throw A2uiDataError(
+            "Cannot set path '$path': "
+            'the data model root is a primitive value.',
+            path: path,
+          );
+        }
         _data ??= <String, Object?>{};
         Object? current = _data;
         for (var i = 0; i < dataPath.segments.length - 1; i++) {
           final String segment = dataPath.segments[i];
           final String nextSegment = dataPath.segments[i + 1];
-          final isNextNumeric = int.tryParse(nextSegment) != null;
+          final isNextNumeric = _parseListIndex(nextSegment) != null;
 
           if (current is Map<String, Object?>) {
             if (!current.containsKey(segment) || current[segment] == null) {
-              current[segment] = isNextNumeric
-                  ? <Object?>[]
-                  : <String, Object?>{};
+              current[segment] =
+                  isNextNumeric ? <Object?>[] : <String, Object?>{};
             }
             current = current[segment];
           } else if (current is List<Object?>) {
-            final int? index = int.tryParse(segment);
+            final int? index = _parseListIndex(segment);
             if (index == null) {
               throw A2uiDataError(
                 "Cannot use non-numeric segment '$segment' on a list.",
@@ -93,9 +127,8 @@ class DataModel {
               current.add(null);
             }
             if (current[index] == null) {
-              current[index] = isNextNumeric
-                  ? <Object?>[]
-                  : <String, Object?>{};
+              current[index] =
+                  isNextNumeric ? <Object?>[] : <String, Object?>{};
             }
             current = current[index];
           } else {
@@ -115,7 +148,7 @@ class DataModel {
             current[lastSegment] = value;
           }
         } else if (current is List<Object?>) {
-          final int? index = int.tryParse(lastSegment);
+          final int? index = _parseListIndex(lastSegment);
           if (index == null) {
             throw A2uiDataError(
               "Cannot use non-numeric segment '$lastSegment' on a list.",
@@ -128,10 +161,24 @@ class DataModel {
               path: path,
             );
           }
-          while (current.length <= index) {
-            current.add(null);
+          // A delete of an index that does not exist leaves the list
+          // unchanged. Only a write may extend a list.
+          if (value != null) {
+            while (current.length <= index) {
+              current.add(null);
+            }
+            current[index] = value;
+          } else if (index < current.length) {
+            current[index] = null;
           }
-          current[index] = value;
+        } else {
+          // The parent resolved to a primitive, so there is nothing to
+          // write into. Dropping the write would hide a malformed path.
+          throw A2uiDataError(
+            "Cannot set path '$path': '$lastSegment' is a property of a "
+            'primitive value.',
+            path: path,
+          );
         }
       }
 
@@ -182,9 +229,20 @@ class DataModel {
     }
 
     final Object? newValue = get(path);
-    // Force notification even if the value is the same reference, because
-    // mutable containers (Maps/Lists) may have changed in place.
-    sig.set(newValue, force: true);
+    // A container mutated in place keeps its identity, so the live object
+    // would compare equal and suppress the notification. Hand over a copy,
+    // and let the signal's equality check suppress genuinely unchanged
+    // values; notifying unconditionally would wake unaffected observers.
+    // Match on the bare `Map` and `List` types: a caller may hand over a
+    // `Map<dynamic, dynamic>`, which a bare `{}` literal and YAML both
+    // produce, and a pattern naming the type arguments would miss it and
+    // fall through to the no-copy branch -- losing the notification.
+    sig.set(switch (newValue) {
+      final Map<String, Object?> map => Map<String, Object?>.of(map),
+      final Map<Object?, Object?> map => Map<Object?, Object?>.of(map),
+      final List<Object?> list => List<Object?>.of(list),
+      _ => newValue,
+    });
   }
 
   void _pruneSignals() {

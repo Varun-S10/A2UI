@@ -17,12 +17,14 @@ import Testing
 
 @testable import BasicCatalog
 
-private final class MockFunctionHandler: FunctionHandler, @unchecked Sendable {
+@MainActor
+private final class MockFunctionHandler: FunctionHandler {
   func function(named: String, catalogID: String?) -> (any FunctionImplementation)? {
     return nil
   }
 }
 
+@MainActor
 struct RegexFunctionTests {
 
   let function = RegexFunction()
@@ -56,10 +58,11 @@ struct RegexFunctionTests {
     #expect(result == .boolean(true))
   }
 
-  @Test func evaluatesToFalseWhenPatternIsInvalid() throws {
-    let result = try function.evaluate(
-      arguments: ["value": .string("foo"), "pattern": .string("[invalid")], context: context)
-    #expect(result == .boolean(false))
+  @Test func throwsErrorWhenPatternIsInvalid() throws {
+    #expect(throws: FunctionError.self) {
+      try function.evaluate(
+        arguments: ["value": .string("foo"), "pattern": .string("[invalid")], context: context)
+    }
   }
 
   @Test func evaluatesToFalseWhenValueIsMissing() throws {

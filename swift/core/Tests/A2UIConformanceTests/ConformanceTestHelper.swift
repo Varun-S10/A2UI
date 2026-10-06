@@ -20,6 +20,24 @@ import OrderedCollections
 import OrderedJSON
 import Yams
 
+private final class ExtendedStackResultBox<T>: @unchecked Sendable {
+  var result: Result<T, Error>?
+}
+
+/// Concrete `FunctionImplementation` for conformance testing.
+public struct ConformanceFunctionImplementation: FunctionImplementation, Sendable {
+  public let api: FunctionAPI
+
+  public init(api: FunctionAPI) {
+    self.api = api
+  }
+
+  @MainActor
+  public func evaluate(arguments: [String: JSONValue], context: DataContext) throws -> JSONValue {
+    .null
+  }
+}
+
 /// Test helper providing repository path resolution, YAML/JSON loading, and catalog setup.
 public enum ConformanceTestHelper {
   /// Resolves the repository root URL using `#filePath` or `A2UI_CONFORMANCE_DIR`.
@@ -63,10 +81,36 @@ public enum ConformanceTestHelper {
   public static func loadYAML(filename: String) throws -> Any {
     let fileURL = conformanceDirectory.appendingPathComponent(filename)
     let yamlString = try String(contentsOf: fileURL, encoding: .utf8)
-    guard let loaded = try Yams.load(yaml: yamlString) else {
-      throw A2UIValidationError("Failed to parse YAML from \(filename)")
+    return try runWithExtendedStack(size: 8 * 1024 * 1024) {
+      guard let loaded = try Yams.load(yaml: yamlString) else {
+        throw A2UIValidationError("Failed to parse YAML from \(filename)")
+      }
+      return loaded
     }
-    return loaded
+  }
+
+  /// Runs a closure on a dedicated thread with an explicitly expanded stack size (default 8 MB).
+  ///
+  /// This prevents stack exhaustion during deep recursive operations, such as parsing
+  /// 100-level recursive YAML mappings with Yams/libyaml on macOS where SPM worker threads
+  /// default to 512 KB.
+  public static func runWithExtendedStack<T>(
+    size: Int = 8 * 1024 * 1024,
+    _ body: @escaping @Sendable () throws -> T
+  ) throws -> T {
+    let box = ExtendedStackResultBox<T>()
+    let semaphore = DispatchSemaphore(value: 0)
+    let thread = Thread {
+      box.result = Result { try body() }
+      semaphore.signal()
+    }
+    thread.stackSize = size
+    thread.start()
+    semaphore.wait()
+    guard let result = box.result else {
+      throw A2UIValidationError("Thread terminated without result")
+    }
+    return try result.get()
   }
 
   /// Loads and decodes a JSON file relative to the `conformance/` directory.
@@ -76,105 +120,159 @@ public enum ConformanceTestHelper {
     return try JSONValue.parse(data)
   }
 
-  /// Builds a `Catalog` from a test case catalog configuration dictionary.
+  /// Loads and decodes a JSON file relative to the repository root.
+  ///
+  /// Suite fields such as `catalogPaths` hold repository-relative paths.
+  public static func loadRepositoryJSON(path: String) throws -> JSONValue {
+    let data = try Data(contentsOf: repoRoot.appendingPathComponent(path))
+    return try JSONValue.parse(data)
+  }
+
+  /// Builds the catalogs that a test case declares.
+  ///
+  /// An inline `catalog` object takes precedence. Otherwise, one catalog is built for each
+  /// entry of `catalogPaths`, together with the `common_types.json` file of the same
+  /// specification version.
+  public static func buildCatalogs(for testCase: ConformanceTestCase) throws -> [AnyCatalog] {
+    if let inlineCatalog = testCase.inlineCatalog {
+      let commonTypes = try? commonTypesSchema(
+        forProtocolVersion: testCase.protocolVersion ?? "v0.9"
+      )
+      return [buildCatalog(catalogSchema: inlineCatalog, commonTypes: commonTypes)]
+    }
+    return try testCase.catalogPaths.map { path in
+      buildCatalog(
+        catalogSchema: try loadRepositoryJSON(path: path),
+        commonTypes: try commonTypesSchema(forCatalogPath: path)
+      )
+    }
+  }
+
+  /// Finds the `common_types.json` schema for a given protocol version.
+  public static func commonTypesSchema(forProtocolVersion version: String) throws -> JSONValue? {
+    let subpath = version.hasPrefix("v1") ? "v1_0" : (version.hasPrefix("v0.8") ? "v0_8" : "v0_9")
+    let fileURL = repoRoot.appendingPathComponent("specification/\(subpath)/json/common_types.json")
+    guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
+    return try JSONValue.parse(try Data(contentsOf: fileURL))
+  }
+
+  /// Finds the `common_types.json` schema that a catalog file references.
+  ///
+  /// Specification catalogs live at `specification/<version>/catalogs/<name>/catalog.json`,
+  /// and their common types at `specification/<version>/json/common_types.json`.
+  public static func commonTypesSchema(forCatalogPath path: String) throws -> JSONValue? {
+    let catalogDirectory = repoRoot.appendingPathComponent(path).deletingLastPathComponent()
+    let candidates = [
+      catalogDirectory.appendingPathComponent("common_types.json"),
+      catalogDirectory
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("json/common_types.json"),
+    ]
+    guard
+      let commonTypesURL = candidates.first(where: {
+        FileManager.default.fileExists(atPath: $0.path)
+      })
+    else {
+      return nil
+    }
+    return try JSONValue.parse(try Data(contentsOf: commonTypesURL))
+  }
+
+  /// Builds a `Catalog` from a catalog schema and an optional common types schema.
   public static func buildCatalog(
-    from catalogConfiguration: [String: JSONValue]?
-  ) -> AnyCatalog? {
-    guard let catalogConfiguration else { return nil }
-    var catalogID = "test_catalog"
-    var components: [AnyComponentAPI] = []
+    catalogSchema: JSONValue,
+    commonTypes: JSONValue?
+  ) -> AnyCatalog {
     var allDefinitions: OrderedDictionary<String, JSONValue> = [:]
     var remoteSchemas = A2UICommonSchema.allSchemas
 
-    loadCommonTypesDefinitions(
-      from: catalogConfiguration,
-      remoteSchemas: &remoteSchemas,
-      allDefinitions: &allDefinitions
-    )
-
-    let catalogSchemaJSON = loadCatalogDefinitions(
-      from: catalogConfiguration,
-      allDefinitions: &allDefinitions
-    )
-
-    let context = Context(dialect: .draft2020_12, remoteSchema: remoteSchemas)
-
-    if let catalogSchemaJSON = catalogSchemaJSON {
-      if let identifier = catalogSchemaJSON["catalogId"]?.stringValue {
-        catalogID = identifier
-      }
-      if let componentsObject = catalogSchemaJSON["components"]?.objectValue {
-        for (componentName, componentSchemaValue) in componentsObject {
-          var fullComponentObject = componentSchemaValue.objectValue ?? [:]
-          if !allDefinitions.isEmpty {
-            var componentDefinitions = fullComponentObject["$defs"]?.objectValue ?? [:]
-            for (key, definition) in allDefinitions {
-              if componentDefinitions[key] == nil {
-                componentDefinitions[key] = definition
-              }
-            }
-            fullComponentObject["$defs"] = .object(componentDefinitions)
-          }
-
-          if let schema = try? Schema(rawSchema: .object(fullComponentObject), context: context) {
-            components.append(AnyComponentAPI(name: componentName, schema: schema))
-          }
-        }
-      }
-    }
-
-    return Catalog(id: catalogID, components: components)
-  }
-
-  private static func loadCommonTypesDefinitions(
-    from catalogConfiguration: [String: JSONValue],
-    remoteSchemas: inout [String: JSONValue],
-    allDefinitions: inout OrderedDictionary<String, JSONValue>
-  ) {
-    guard let commonTypesValue = catalogConfiguration["common_types_schema"] else { return }
-
-    var commonTypesJSON: JSONValue?
-    if let pathString = commonTypesValue.stringValue {
-      commonTypesJSON = try? loadJSON(filename: pathString)
-    } else if commonTypesValue.objectValue != nil {
-      commonTypesJSON = commonTypesValue
-    }
-
-    if let commonTypes = commonTypesJSON {
+    if let commonTypes {
       if let identifierString = commonTypes["$id"]?.stringValue {
         remoteSchemas[identifierString] = commonTypes
       }
       remoteSchemas["common_types.json"] = commonTypes
+      remoteSchemas["https://swift-json-schema.invalid/common_types.json"] = commonTypes
       remoteSchemas["https://a2ui.org/specification/v0_9/common_types.json"] = commonTypes
-      remoteSchemas["https://a2ui.org/specification/v0_9_1/common_types.json"] = commonTypes
-    }
-
-    if let definitions = commonTypesJSON?["$defs"]?.objectValue {
-      for (key, definition) in definitions {
+      remoteSchemas["https://a2ui.org/schemas/v0_9_1/common.json"] = commonTypes
+      for (key, definition) in commonTypes["$defs"]?.objectValue ?? [:] {
         allDefinitions[key] = definition
       }
     }
-  }
-
-  private static func loadCatalogDefinitions(
-    from catalogConfiguration: [String: JSONValue],
-    allDefinitions: inout OrderedDictionary<String, JSONValue>
-  ) -> JSONValue? {
-    guard let catalogSchemaValue = catalogConfiguration["catalog_schema"] else { return nil }
-
-    var catalogSchemaJSON: JSONValue?
-    if let pathString = catalogSchemaValue.stringValue {
-      catalogSchemaJSON = try? loadJSON(filename: pathString)
-    } else if catalogSchemaValue.objectValue != nil {
-      catalogSchemaJSON = catalogSchemaValue
+    for (key, definition) in catalogSchema["$defs"]?.objectValue ?? [:] {
+      allDefinitions[key] = definition
     }
 
-    if let catalogDefinitions = catalogSchemaJSON?["$defs"]?.objectValue {
-      for (key, definition) in catalogDefinitions {
-        allDefinitions[key] = definition
+    let context = Context(dialect: .draft2020_12, remoteSchema: remoteSchemas)
+    var components: [AnyComponentAPI] = []
+    if let compObj = catalogSchema["components"]?.objectValue {
+      for (componentName, componentSchemaValue) in compObj {
+        var fullComponentObject = componentSchemaValue.objectValue ?? [:]
+        if !allDefinitions.isEmpty {
+          var componentDefinitions = fullComponentObject["$defs"]?.objectValue ?? [:]
+          for (key, definition) in allDefinitions where componentDefinitions[key] == nil {
+            componentDefinitions[key] = definition
+          }
+          fullComponentObject["$defs"] = .object(componentDefinitions)
+        }
+
+        if let schema = try? Schema(rawSchema: .object(fullComponentObject), context: context) {
+          components.append(AnyComponentAPI(name: componentName, schema: schema))
+        }
+      }
+    } else if let compArray = catalogSchema["components"]?.arrayValue {
+      for compVal in compArray {
+        guard let name = compVal["name"]?.stringValue else { continue }
+        var fullComponentObject = compVal["schema"]?.objectValue ?? ["type": .string("object")]
+        if !allDefinitions.isEmpty {
+          var componentDefinitions = fullComponentObject["$defs"]?.objectValue ?? [:]
+          for (key, definition) in allDefinitions where componentDefinitions[key] == nil {
+            componentDefinitions[key] = definition
+          }
+          fullComponentObject["$defs"] = .object(componentDefinitions)
+        }
+        if let schema = try? Schema(rawSchema: .object(fullComponentObject), context: context) {
+          components.append(AnyComponentAPI(name: name, schema: schema))
+        }
       }
     }
-    return catalogSchemaJSON
+
+    var functions: [any FunctionImplementation] = []
+    if let funcObj = catalogSchema["functions"]?.objectValue {
+      for (funcName, funcVal) in funcObj {
+        let returnTypeStr = funcVal["returnType"]?.stringValue ?? "any"
+        let retType = FunctionReturnType(rawValue: returnTypeStr) ?? .any
+        let paramObj = funcVal["parameters"]?.objectValue ?? [:]
+        if let schema = try? Schema(rawSchema: .object(paramObj), context: context) {
+          let api = FunctionAPI(name: funcName, returnType: retType, schema: schema)
+          functions.append(ConformanceFunctionImplementation(api: api))
+        }
+      }
+    } else if let funcArray = catalogSchema["functions"]?.arrayValue {
+      for funcVal in funcArray {
+        guard let name = funcVal["name"]?.stringValue else { continue }
+        let returnTypeStr = funcVal["returnType"]?.stringValue ?? "any"
+        let retType = FunctionReturnType(rawValue: returnTypeStr) ?? .any
+        let paramObj = funcVal["parameters"]?.objectValue ?? [:]
+        if let schema = try? Schema(rawSchema: .object(paramObj), context: context) {
+          let api = FunctionAPI(name: name, returnType: retType, schema: schema)
+          functions.append(ConformanceFunctionImplementation(api: api))
+        }
+      }
+    }
+
+    var themeSchema: Schema?
+    if let rawTheme = catalogSchema["theme"] {
+      themeSchema = try? Schema(rawSchema: rawTheme, context: context)
+    }
+
+    let catalogID = catalogSchema["catalogId"]?.stringValue ?? "test_catalog"
+    return Catalog(
+      id: catalogID,
+      components: components,
+      functions: functions,
+      themeSchema: themeSchema
+    )
   }
 
   /// Recursively converts arbitrary YAML data (`[String: Any]`, `[Any]`, primitives)
@@ -206,52 +304,44 @@ public enum ConformanceTestHelper {
     }
   }
 
-  /// Extracts test cases from a loaded YAML object.
+  /// Extracts test cases from a loaded YAML object that uses the camelCase suite schema.
+  ///
+  /// Each step's `messages` list becomes the step payload, and a step without its own
+  /// `expectError` inherits the case-level one.
   public static func parseTestCases(from loadedYAML: Any) -> [ConformanceTestCase] {
     guard let array = loadedYAML as? [[String: Any]] else { return [] }
     return array.compactMap { dictionary in
       guard let name = dictionary["name"] as? String else { return nil }
-      let description = dictionary["description"] as? String
-      let catalogConfiguration = (dictionary["catalog"] as? [String: Any]).map {
-        toJSONValue($0).dictionaryValue ?? [:]
-      }
-      let action = dictionary["action"] as? String
-      let expectError = parseExpectError(dictionary["expect_error"])
-      let payload = dictionary["payload"].map { toJSONValue($0) }
-      let assertions = (dictionary["assertions"] as? [String: Any]).map {
-        toJSONValue($0).dictionaryValue ?? [:]
-      }
-      let surface = (dictionary["surface"] as? [String: Any]).map {
-        toJSONValue($0).dictionaryValue ?? [:]
+      let expectError = parseExpectError(dictionary["expectError"])
+
+      var catalogPaths = dictionary["catalogPaths"] as? [String] ?? []
+      if let catalogPath = dictionary["catalogPath"] as? String {
+        catalogPaths.append(catalogPath)
       }
 
-      var steps: [ConformanceStep] = []
-      if let stepsArray = dictionary["steps"] as? [[String: Any]] {
-        for stepDictionary in stepsArray {
-          let stepPayload = stepDictionary["payload"].map { toJSONValue($0) }
-          let stepError = parseExpectError(stepDictionary["expect_error"]) ?? expectError
-          steps.append(ConformanceStep(payload: stepPayload, expectError: stepError))
-        }
-      } else if let validateArray = dictionary["validate"] as? [[String: Any]] {
-        for stepDictionary in validateArray {
-          let stepPayload = stepDictionary["payload"].map { toJSONValue($0) }
-          let stepError = parseExpectError(stepDictionary["expect_error"]) ?? expectError
-          steps.append(ConformanceStep(payload: stepPayload, expectError: stepError))
-        }
-      } else if let payload {
-        steps.append(ConformanceStep(payload: payload, expectError: expectError))
+      let steps = (dictionary["steps"] as? [[String: Any]] ?? []).map { stepDictionary in
+        ConformanceStep(
+          payload: stepDictionary["messages"].map { toJSONValue($0) },
+          expectError: parseExpectError(stepDictionary["expectError"]) ?? expectError
+        )
       }
 
       return ConformanceTestCase(
         name: name,
-        description: description,
-        catalogConfiguration: catalogConfiguration,
-        action: action,
-        payload: payload,
+        description: dictionary["description"] as? String,
+        action: dictionary["action"] as? String,
+        protocolVersion: dictionary["protocolVersion"] as? String,
+        strictMode: dictionary["strictMode"] as? Bool ?? false,
+        catalogPaths: catalogPaths,
+        inlineCatalog: (dictionary["catalog"] as? [String: Any]).map { toJSONValue($0) },
         steps: steps,
         expectError: expectError,
-        assertions: assertions,
-        surface: surface
+        assertions: (dictionary["assertions"] as? [String: Any]).map {
+          toJSONValue($0).dictionaryValue ?? [:]
+        },
+        surface: (dictionary["surface"] as? [String: Any]).map {
+          toJSONValue($0).dictionaryValue ?? [:]
+        }
       )
     }
   }
@@ -289,9 +379,15 @@ public enum ConformanceTestHelper {
 public struct ConformanceTestCase: Sendable {
   public let name: String
   public let description: String?
-  public let catalogConfiguration: [String: JSONValue]?
   public let action: String?
-  public let payload: JSONValue?
+  /// The protocol version the case targets, for example `"v0.9"`.
+  public let protocolVersion: String?
+  /// Whether the case requires strict topology validation (`strictMode: true`).
+  public let strictMode: Bool
+  /// Repository-relative catalog schema paths (`catalogPaths`, or a single `catalogPath`).
+  public let catalogPaths: [String]
+  /// An inline catalog schema (`catalog`), used instead of `catalogPaths` when present.
+  public let inlineCatalog: JSONValue?
   public let steps: [ConformanceStep]
   public let expectError: ConformanceExpectError?
   public let assertions: [String: JSONValue]?

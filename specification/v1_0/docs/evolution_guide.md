@@ -18,7 +18,17 @@ Version 1.0 differs from 0.9 in the following ways:
 - The `functions` field in catalog meta-schemas (`catalog_definition.json`) is now formalized as a JSON object map of function name to its definition, matching the map structure used in catalog files.
 - Standard JSON Schema metadata fields (`$schema`, `$id`, `title`, and `description`) are supported in catalogs, preventing validation failures on inline catalogs with strict property checks.
 - Identifier naming rules across all catalog entities (component names, function names, and argument keys) must conform to Unicode Standard Annex #31 (UAX #31).
-- The `@index` built-in function dynamically retrieves iteration indices during list template rendering. The `@` prefix is reserved for core system context evaluations.
+- Reserved `@` prefix across protocol keys (`@path` for data bindings, `@call` for function calls, `@index` for template iteration). Plain objects containing `"path"` or `"call"` keys are treated as literal dictionary values and are no longer intercepted as dynamic directives. Unknown single-`@` keys (`^@([^@]|$)`) in dynamic objects are disallowed, and literal `@` keys in plain objects are escaped via prefix doubling (`"@@path"` → `"@path"`).
+
+  > [!WARNING]
+  > Do not migrate v0.9 payloads with a blanket find-and-replace of `"path":` → `"@path":` or `"call":` → `"@call":`. Only `DataBinding` and `FunctionCall` positions take the prefix. These keep their unprefixed spelling in v1.0:
+  >
+  > - `ChildList` template objects: `{"componentId": "itemTemplate", "path": "/items"}`.
+  > - The `updateDataModel` message envelope's `path` field, which is a message parameter rather than a data binding.
+  > - Any `"call"` that is ordinary data rather than a directive, such as the `call` entry in the basic catalog's `Icon` name enum.
+  >
+  > Rewrite only the objects a renderer evaluates as a `DynamicValue`. In those objects, every key that needs a literal leading `@` must be escaped by doubling it, whatever follows the prefix: `"@@type"` for a literal `"@type"`, `"@@"` for a literal `"@"`. An unescaped leading `@` is reserved for protocol directives and is rejected.
+
 - Standardized the names of core architectural components, renaming "client" to _renderer_ and "server" to _agent_ (e.g., `server_to_client` schemas are renamed to `agent_to_renderer`), because A2UI is sometimes generated on clients, and rendering sometimes happens on servers, making those terms ambiguous.
 - Catalogs can now define composition constraints (`allowedParents` and `allowedChildren`) on component definitions, using `"Surface"` as the canonical root component type. Because JSON Schema cannot natively restrict child component types across a flat adjacency list of ID references, these rules allow catalogs to declare valid parent-child relationships without altering the wire format.
 - `CheckRule` in `common_types.json` supports dynamic structured validation result objects (`ValidationResult`) returned directly by function evaluations or data bindings (containing `valid`, `code`, `message`, and `severity`), and `message` on `CheckRule` is made optional as a fallback error message.
@@ -41,6 +51,7 @@ Version 1.0 differs from 0.9 in the following ways:
 - Added `"propertyNames": { "not": { "const": "Surface" } }` to the `components` map in `catalog_definition.json` to enforce reserving `"Surface"` at the schema validation level.
 - Added the canonical `"Surface"` container component type in `common_types.json` to represent the top-level container of a surface for `"allowedParents": ["Surface"]` rules. The protocol reserves the `"Surface"` component name. The `createSurface` message implicitly creates `Surface` with `"child": "root"`, and you cannot modify `Surface` using `updateComponents`. These schema additions are catalog-level metadata and do not alter the wire format of component instances in `createSurface` or `updateComponents`.
 - Added static `metadata` (containing `extensions`) property to `ComponentDefinition` inside `catalog_definition.json`.
+- Introduced `x-deprecated-reason` as a human-readable explanation for a deprecated component, function, or property in addition to the standard JSON Schema `deprecated: true`.
 
 ### 2.2. Standard catalogs (basic)
 
@@ -51,6 +62,7 @@ Version 1.0 differs from 0.9 in the following ways:
 - Refactored component definitions in `catalogs/basic/catalog.json` from `allOf: [ComponentCommon, ...]` and `unevaluatedProperties: false` to direct explicit property definitions (including explicit `component` const and `weight` props) or `$defs/Checkable`.
 - Added an optional `instructions` field to the `Catalog` schema (`catalogs/basic/catalog.json`) to embed Markdown guidelines/rules directly, replacing the external `rules.txt` file.
 - Updated return types on standard validation check functions (`required`, `regex`, `length`, `numeric`, `email`) in `catalogs/basic/catalog.json` from `"boolean"` to `"validationResult"`.
+- Updated external references to standard types in `catalogs/basic/catalog.json` to use relative paths (`common_types.json#/$defs/...`) instead of version-qualified URLs.
 - Removed `$defs/theme` from the basic catalog.
 
 ### 2.3. Agent-to-renderer messages
@@ -145,3 +157,10 @@ This section outlines the steps required to migrate existing applications and co
 - Support built-in `@index` evaluation during list template rendering (Collection Scope) to provide the 0-based iteration index, adjusted by any `offset` parameter.
 - Support dynamic `ValidationResult` objects (`valid`, `code`, `message`, `severity`) returned by component validation check conditions, falling back to static `CheckRule.message` if present.
 - Rename all references, constants, and endpoints mapping to `client_to_server.json` or `client_capabilities.json` to use `renderer_to_agent.json` and `renderer_capabilities.json`.
+
+### For catalog authors
+
+- **Set catalog protocol version**: Catalogs targeting v1.0 must specify `"protocolVersion": "1.0"` in the catalog root.
+- **Use relative standard type references**: Replace version-qualified schema URLs (`https://a2ui.org/specification/v1_0/common_types.json#/$defs/...`) with unversioned relative targets (`common_types.json#/$defs/...`).
+- **Breaking changes from v0.9 to v1.0**: Catalogs authored for v0.9 cannot be used directly with v1.0 protocol runtimes due to breaking structural changes (such as composing `ComponentCommon` at the envelope level, returning `ValidationResult` objects from check functions, and declaring caller and composition constraints).
+- **Future forward compatibility**: Using unversioned relative references allows v1.0 catalogs to potentially work against future protocol versions without requiring catalog authors to rewrite `$ref` URLs.

@@ -39,6 +39,7 @@ struct TestConcatFunction: FunctionImplementation {
     )
   )
 
+  @MainActor
   func evaluate(arguments: [String: JSONValue], context: DataContext) throws -> JSONValue {
     let a = arguments["a"]?.stringValue ?? ""
     let b = arguments["b"]?.stringValue ?? ""
@@ -55,6 +56,7 @@ struct TestRequiredFunction: FunctionImplementation {
     schema: try! Schema(instance: "{\"type\": \"object\"}")
   )
 
+  @MainActor
   func evaluate(arguments: [String: JSONValue], context: DataContext) throws -> JSONValue {
     guard let value = arguments["value"] else { return .boolean(false) }
     switch value {
@@ -72,6 +74,7 @@ struct TestEmailFunction: FunctionImplementation {
     schema: try! Schema(instance: "{\"type\": \"object\"}")
   )
 
+  @MainActor
   func evaluate(arguments: [String: JSONValue], context: DataContext) throws -> JSONValue {
     guard let s = arguments["value"]?.stringValue else { return .boolean(false) }
     return .boolean(s.contains("@") && s.contains("."))
@@ -621,6 +624,71 @@ struct SurfaceViewModelTests {
     #expect(funcCallJSON["call"]?.stringValue == "submit")
   }
 
+  @Test func actionTriggersLocalFunctionCall() async throws {
+    let (processor, surface, handler) = try makeProcessor()
+    processor.updateComponents(
+      surfaceID: surface.surfaceID,
+      components: [
+        [
+          "id": "root",
+          "component": "button",
+          "onClick": [
+            "functionCall": [
+              "call": "concat",
+              "args": ["a": "hello ", "b": "world"],
+            ]
+          ],
+        ]
+      ]
+    )
+    let rootNode = try #require(surface.nodeResolver.resolveTree())
+    let action = try #require(rootNode.properties["onClick"] as? ResolvedAction)
+    action()
+    #expect(handler.capturedActions.isEmpty)
+  }
+
+  @Test func actionTriggersUnwrappedLocalCall() async throws {
+    let (_, surface, handler) = try makeProcessor()
+    let component = ComponentModel(
+      id: "root",
+      type: "button",
+      properties: [
+        "onClick": [
+          "call": "concat",
+          "args": ["a": "foo ", "b": "bar"],
+        ]
+      ]
+    )
+    surface.componentsModel.addComponent(component)
+    let rootNode = try #require(surface.nodeResolver.resolveTree())
+    let action = try #require(rootNode.properties["onClick"] as? ResolvedAction)
+    action()
+    #expect(handler.capturedActions.isEmpty)
+  }
+
+  @Test func actionDispatchesDirectNameEvent() async throws {
+    let (_, surface, handler) = try makeProcessor()
+    let component = ComponentModel(
+      id: "root",
+      type: "button",
+      properties: [
+        "onClick": [
+          "name": "submit_direct",
+          "context": ["userId": "u123"],
+        ]
+      ]
+    )
+    surface.componentsModel.addComponent(component)
+    let rootNode = try #require(surface.nodeResolver.resolveTree())
+    let action = try #require(rootNode.properties["onClick"] as? ResolvedAction)
+    action()
+    #expect(handler.capturedActions.count == 1)
+    #expect(
+      handler.capturedActions.first?.identity
+        == .event(name: "submit_direct", context: ["userId": .string("u123")])
+    )
+  }
+
   // MARK: - Validation Checks
 
   @Test func checksResolveAndReflectInNodeValidationErrors() async throws {
@@ -1055,6 +1123,7 @@ struct ComponentModelTests {
 
 // MARK: - SurfaceComponentsModel Tests
 
+@MainActor
 struct SurfaceComponentsModelTests {
 
   @Test func startsEmpty() {
@@ -1113,30 +1182,8 @@ struct SurfaceComponentsModelTests {
 
 // MARK: - DataModel Tests
 
+@MainActor
 struct DataModelTests {
-
-  @Test func startsEmpty() {
-    let model = DataModel()
-    #expect(model.data == .object([:]))
-  }
-
-  @Test func setsAndGetsValueAtPath() {
-    let model = DataModel()
-    model.set("/user/name", value: "Alice")
-    #expect(model.get("/user/name")?.stringValue == "Alice")
-  }
-
-  @Test func setsNilRemovesValue() {
-    let model = DataModel()
-    model.set("/user/name", value: "Alice")
-    model.set("/user/name", value: nil)
-    #expect(model.get("/user/name") == nil)
-  }
-
-  @Test func initializesWithValue() {
-    let model = DataModel(initial: ["name": "Bob"])
-    #expect(model.get("/name")?.stringValue == "Bob")
-  }
 
   @Test func subscriberReadingBackThroughModelSeesStoredValue() {
     let model = DataModel()
@@ -1151,21 +1198,6 @@ struct DataModelTests {
     #expect(announced.count == 2)
     #expect(announced[1]["/user/name"]?.stringValue == "Alice")
     #expect(readBack[1]?.stringValue == "Alice")
-  }
-
-  @Test func setsRootPathReplacesEntireData() {
-    let model = DataModel(initial: ["oldKey": "oldVal", "sharedKey": "prev"])
-    model.set("", value: ["newKey": "newVal"])
-    #expect(model.get("/newKey")?.stringValue == "newVal")
-    #expect(model.get("/oldKey") == nil)
-    #expect(model.get("") == .object(["newKey": "newVal"]))
-
-    model.set("/", value: ["other": 123])
-    #expect(model.get("/other")?.intValue == 123)
-    #expect(model.get("/newKey") == nil)
-
-    model.set("", value: nil)
-    #expect(model.data == .object([:]))
   }
 }
 

@@ -16,7 +16,7 @@ import A2UICore
 import OrderedJSON
 import Testing
 
-@Suite
+@MainActor
 struct DataContextTests {
 
   @Test func setUpdatesDataModelWithAbsolutePath() {
@@ -38,10 +38,11 @@ struct DataContextTests {
 
   @Test func nestedReturnsNilIfFunctionHandlerIsDeallocated() {
     let dataModel = DataModel()
-    var handler: MockFunctionHandler? = MockFunctionHandler()
-    let context = DataContext(dataModel: dataModel, path: "/foo", functionHandler: handler!)
-
-    handler = nil
+    let context: DataContext
+    do {
+      let handler = MockFunctionHandler()
+      context = DataContext(dataModel: dataModel, path: "/foo", functionHandler: handler)
+    }
     let nested = context.nested(relativePath: "baz")
     #expect(nested == nil)
   }
@@ -106,9 +107,37 @@ struct DataContextTests {
     #expect(context.resolveDynamicValue(literalWithCall) == literalWithCall)
     #expect(mockHandler.lastRequestedName == nil)
   }
+
+  @Test func v10ProtocolVersionGatingResolvesAtDirectivesAndEscaping() throws {
+    let mockHandler = MockFunctionHandler()
+    let dataModel = DataModel()
+    dataModel.set("/item", value: "apple")
+    let context = DataContext(
+      dataModel: dataModel,
+      path: "/",
+      functionHandler: mockHandler,
+      protocolVersion: "v1.0"
+    )
+
+    let atPathBinding: JSONValue = ["@path": "/item"]
+    #expect(context.resolveDynamicValue(atPathBinding) == "apple")
+
+    let plainPathObject: JSONValue = ["path": "/item"]
+    #expect(context.resolveDynamicValue(plainPathObject) == plainPathObject)
+
+    let escapedObject: JSONValue = ["@@path": "/item", "@@type": "fruit"]
+    let resolved = context.resolveDynamicValue(escapedObject)
+    #expect(resolved.objectValue?["@path"] == "/item")
+    #expect(resolved.objectValue?["@type"] == "fruit")
+
+    #expect(throws: A2UIValidationError.self) {
+      try DataContext.validateReservedDirectives(["@invalidKey"])
+    }
+  }
 }
 
-private final class MockFunctionHandler: FunctionHandler, @unchecked Sendable {
+@MainActor
+private final class MockFunctionHandler: FunctionHandler {
   var functionToReturn: (any FunctionImplementation)? = nil
   var lastRequestedName: String? = nil
   var lastRequestedCatalogID: String? = nil

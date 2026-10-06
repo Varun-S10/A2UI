@@ -1,0 +1,197 @@
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:a2ui_core/a2ui_core.dart';
+import 'package:a2ui_core/src/core/contexts.dart' show ComponentContext;
+import 'package:a2ui_core/src/rendering/binder.dart' show GenericBinder;
+import 'package:test/test.dart';
+
+import 'conformance/conformance_harness.dart';
+
+/// The published basic catalog, which agent-side tests are measured against.
+const String basicCatalogPath =
+    '../specification/v0_9_1/catalogs/basic/catalog.json';
+
+const String basicCatalogId =
+    'https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json';
+
+Map<String, Object?> loadBasicCatalogJson() => jsonDecode(
+      File(resolveConformancePath(basicCatalogPath)).readAsStringSync(),
+    ) as Map<String, Object?>;
+
+void main() {
+  group('Catalog.fromJson', () {
+    test('parses the published basic catalog document', () {
+      final CatalogApi catalog = Catalog.fromJson(loadBasicCatalogJson());
+
+      expect(catalog.id, basicCatalogId);
+      expect(
+        catalog.components.keys,
+        containsAll(<String>['Text', 'Card', 'Column', 'Button', 'TextField']),
+      );
+      expect(
+        catalog.functions.keys,
+        containsAll(<String>['required', 'email', 'formatNumber', 'openUrl']),
+      );
+      expect(catalog.themeSchema, isNotNull);
+    });
+
+    test('reads a function argument schema and return type', () {
+      final CatalogApi catalog = Catalog.fromJson(loadBasicCatalogJson());
+
+      final FunctionApi required = catalog.functions['required']!;
+      expect(required.name, 'required');
+      expect(required.returnType, A2uiReturnType.boolean);
+      expect(
+        (required.argumentSchema.value['required']! as List).cast<String>(),
+        ['value'],
+      );
+
+      expect(
+        catalog.functions['formatNumber']!.returnType,
+        A2uiReturnType.string,
+      );
+    });
+
+    test('parses and round-trips validationResult function returnType', () {
+      final CatalogApi catalog = Catalog.fromJson({
+        'catalogId': 'https://example.com/v1_validation_catalog',
+        'functions': {
+          'checkEmail': {
+            'type': 'object',
+            'properties': {
+              'call': {'const': 'checkEmail'},
+              'args': {
+                'type': 'object',
+                'properties': {
+                  'value': {'type': 'string'},
+                },
+                'required': ['value'],
+              },
+              'returnType': {'const': 'validationResult'},
+            },
+            'required': ['call', 'args'],
+          },
+          'checkInline': {
+            'returnType': 'validationResult',
+            'parameters': {
+              'type': 'object',
+              'properties': {
+                'value': {'type': 'string'},
+              },
+            },
+          },
+        },
+      });
+
+      expect(
+        catalog.functions['checkEmail']!.returnType,
+        A2uiReturnType.validationResult,
+      );
+      expect(
+        catalog.functions['checkInline']!.returnType,
+        A2uiReturnType.validationResult,
+      );
+
+      final Map<String, Object?> rebuilt = catalog.catalogSchema;
+      final CatalogApi reparsed = Catalog.fromJson(rebuilt);
+      expect(
+        reparsed.functions['checkEmail']!.returnType,
+        A2uiReturnType.validationResult,
+      );
+      expect(
+        reparsed.functions['checkInline']!.returnType,
+        A2uiReturnType.validationResult,
+      );
+    });
+
+    test(
+      'GenericBinder evaluates checks on a JSON-loaded catalog referencing '
+      'common_types.json#/\$defs/Checkable',
+      () {
+        final CatalogApi parsed = Catalog.fromJson(loadBasicCatalogJson());
+        final rendererCatalog = Catalog<ComponentApi, FunctionImplementation>(
+          id: parsed.id,
+          components: parsed.components.values.toList(),
+          functions: const [],
+        );
+        final surface = SurfaceModel<ComponentApi>(
+          's-json',
+          catalog: rendererCatalog,
+        );
+        addTearDown(surface.dispose);
+
+        surface.dataModel.set('/isValidEmail', false);
+        final model = ComponentModel('tf1', 'TextField', {
+          'label': 'Email',
+          'value': 'invalid@',
+          'checks': [
+            {
+              'condition': {'path': '/isValidEmail'},
+              'message': 'Enter a valid email address',
+            },
+          ],
+        });
+        surface.componentsModel.addComponent(model);
+
+        final binder = GenericBinder(
+          ComponentContext(surface, model),
+          rendererCatalog.components['TextField']!.schema,
+        );
+        addTearDown(binder.dispose);
+
+        expect(binder.resolvedProps.value['isValid'], isFalse);
+        expect(binder.resolvedProps.value['validationErrors'], [
+          'Enter a valid email address',
+        ]);
+        expect(binder.resolvedProps.value['validationResults'], [
+          const ValidationResult(
+            valid: false,
+            message: 'Enter a valid email address',
+            severity: 'error',
+          ),
+        ]);
+
+        surface.dataModel.set('/isValidEmail', true);
+        expect(binder.resolvedProps.value['isValid'], isTrue);
+        expect(binder.resolvedProps.value['validationErrors'], isEmpty);
+        expect(binder.resolvedProps.value['validationResults'], isEmpty);
+      },
+    );
+  });
+
+  group('Catalog generics', () {
+    test('separates function signatures from function implementations', () {
+      // Agents hold schema-only functions; renderers hold implementations.
+      final CatalogApi agentCatalog = Catalog.fromJson(
+        loadBasicCatalogJson(),
+      );
+      expect(agentCatalog.functions.values, everyElement(isA<FunctionApi>()));
+      expect(
+        agentCatalog.functions.values,
+        isNot(anyElement(isA<FunctionImplementation>())),
+      );
+
+      final Catalog<ComponentApi, FunctionImplementation> rendererCatalog =
+          MinimalCatalog();
+      expect(
+        rendererCatalog.functions.values,
+        everyElement(isA<FunctionImplementation>()),
+      );
+    });
+  });
+}

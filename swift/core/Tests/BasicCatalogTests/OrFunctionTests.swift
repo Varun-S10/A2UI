@@ -17,12 +17,14 @@ import Testing
 
 @testable import BasicCatalog
 
-private final class MockFunctionHandler: FunctionHandler, @unchecked Sendable {
+@MainActor
+private final class MockFunctionHandler: FunctionHandler {
   func function(named: String, catalogID: String?) -> (any FunctionImplementation)? {
     return nil
   }
 }
 
+@MainActor
 struct OrFunctionTests {
 
   let function = OrFunction()
@@ -38,20 +40,23 @@ struct OrFunctionTests {
 
   // MARK: - Edge-Case Evaluation
 
-  @Test func evaluatesToFalseWhenValuesIsMissing() throws {
-    let result = try function.evaluate(arguments: [:], context: context)
-    #expect(result == .boolean(false))
+  @Test func throwsErrorWhenValuesIsMissing() throws {
+    #expect(throws: FunctionError.self) {
+      try function.evaluate(arguments: [:], context: context)
+    }
   }
 
-  @Test func evaluatesToFalseWhenValuesIsNotAnArray() throws {
-    let result = try function.evaluate(
-      arguments: ["values": .boolean(true)], context: context)
-    #expect(result == .boolean(false))
+  @Test func throwsErrorWhenValuesIsNotAnArray() throws {
+    #expect(throws: FunctionError.self) {
+      try function.evaluate(
+        arguments: ["values": .boolean(true)], context: context)
+    }
   }
 
-  @Test func evaluatesToFalseWithEmptyArray() throws {
-    let result = try function.evaluate(
-      arguments: ["values": .array([])], context: context)
-    #expect(result == .boolean(false))
+  @Test func throwsErrorWithEmptyArray() throws {
+    #expect(throws: FunctionError.self) {
+      try function.evaluate(
+        arguments: ["values": .array([])], context: context)
+    }
   }
 }

@@ -20,8 +20,7 @@ import {z} from 'zod';
 import {SurfaceModel, ComponentModel, Catalog, extractRefFields} from '@a2ui/web_core/v0_9';
 import {BASIC_FUNCTIONS} from '@a2ui/web_core/v0_9/basic_catalog';
 import {A2uiSurface} from '../src/v0_9/A2uiSurface';
-import {createComponentImplementation} from '../src/v0_9/adapter';
-import type {ReactComponentImplementation} from '../src/v0_9/adapter';
+import {createComponentImplementation, type ReactComponentImplementation} from '../src/v0_9';
 
 /** The resolver builds its tree from the component with this id. */
 const ROOT_ID = 'root';
@@ -42,6 +41,23 @@ const StubChild = createComponentImplementation(
     />
   ),
 );
+
+/**
+ * The outermost element a component rendered inside `container`, looking
+ * through any React host elements (`a2ui-react-*`) that wrap it. Assertions
+ * about a component's own element then hold whether or not the renderer wraps
+ * each component in an element of its own.
+ */
+export function renderedElement(container: Element): HTMLElement | SVGElement {
+  let element = container.firstElementChild;
+  while (element && element.localName.startsWith('a2ui-react-')) {
+    element = element.firstElementChild;
+  }
+  if (!(element instanceof HTMLElement || element instanceof SVGElement)) {
+    throw new Error('The component rendered no element.');
+  }
+  return element;
+}
 
 export interface RenderA2uiOptions {
   initialData?: Record<string, any>;
@@ -75,6 +91,7 @@ export function renderA2uiComponent(
 
   const catalog = new Catalog<ReactComponentImplementation>(
     'test-catalog',
+    '0.9',
     [impl, ...additionalImpls, StubChild],
     functions,
   );
@@ -82,7 +99,7 @@ export function renderA2uiComponent(
 
   surface.dataModel.set('/', initialData);
 
-  const mainModel = new ComponentModel(ROOT_ID, impl.name, initialProperties);
+  const mainModel = new ComponentModel(ROOT_ID, impl.name, initialProperties, catalog);
   surface.componentsModel.addComponent(mainModel);
 
   for (const childModel of additionalComponents) {
@@ -91,7 +108,7 @@ export function renderA2uiComponent(
 
   for (const id of referencedChildIds(impl.schema, initialProperties)) {
     if (!surface.componentsModel.get(id)) {
-      surface.componentsModel.addComponent(new ComponentModel(id, STUB_TYPE, {}));
+      surface.componentsModel.addComponent(new ComponentModel(id, STUB_TYPE, {}, catalog));
     }
   }
 

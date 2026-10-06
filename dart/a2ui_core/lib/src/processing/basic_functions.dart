@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import 'dart:convert';
+
 import 'package:json_schema_builder/json_schema_builder.dart';
 
 import '../core/catalog.dart';
@@ -21,21 +23,19 @@ import '../primitives/reactivity.dart';
 import 'expressions.dart';
 
 class FormatStringFunction extends FunctionImplementation {
-  @override
-  String get name => 'formatString';
-
-  @override
-  A2uiReturnType get returnType => A2uiReturnType.string;
-
-  @override
-  Schema get argumentSchema => Schema.object(
-    properties: {
-      'value': Schema.string(
-        description: 'The string template to interpolate.',
-      ),
-    },
-    required: ['value'],
-  );
+  FormatStringFunction()
+      : super(
+          name: 'formatString',
+          returnType: A2uiReturnType.string,
+          argumentSchema: Schema.object(
+            properties: {
+              'value': Schema.string(
+                description: 'The string template to interpolate.',
+              ),
+            },
+            required: ['value'],
+          ),
+        );
 
   @override
   Object? execute(
@@ -48,15 +48,66 @@ class FormatStringFunction extends FunctionImplementation {
     final List<Object?> parts = parser.parse(template);
 
     if (parts.isEmpty) return '';
-    if (parts.length == 1 && parts[0] is String) return parts[0];
+    if (!parts.any((part) => part is Map)) {
+      return parts.map(_stringifyPart).join('');
+    }
+
+    final List<Object?> resolvedSources = [
+      for (final Object? part in parts)
+        if (part is Map)
+          context.resolveListenable(
+            context.isV10 ? _adaptAstPartForV10(part, context) : part,
+          )
+        else
+          part,
+    ];
 
     return computed(() {
-      final Iterable<String> resolvedParts = parts.map((part) {
-        if (part is String) return part;
-        final ReadonlySignal<Object?> sig = context.resolveListenable(part);
-        return sig.value?.toString() ?? '';
+      final Iterable<String> resolvedParts = resolvedSources.map((source) {
+        final Object? val =
+            source is ReadonlySignal<Object?> ? source.value : source;
+        return _stringifyPart(val);
       });
       return resolvedParts.join('');
     });
+  }
+
+  static String _stringifyPart(Object? val) {
+    if (val == null) return '';
+    if (val is String) return val;
+    if (val is Map || val is List) return jsonEncode(val);
+    return val.toString();
+  }
+
+  static Object? _adaptAstPartForV10(Object? part, DataContext context) {
+    if (part is List) {
+      return [
+        for (final Object? item in part) _adaptAstPartForV10(item, context),
+      ];
+    }
+    if (part is! Map) return part;
+    if (part['path'] is String &&
+        !part.containsKey('componentId') &&
+        !part.containsKey('@path')) {
+      return context.bindingFor(part['path'] as String);
+    }
+    if (part['call'] is String && !part.containsKey('@call')) {
+      final Object? rawArgs = part['args'];
+      final adaptedArgs = rawArgs is Map
+          ? <String, Object?>{
+              for (final MapEntry<Object?, Object?> entry in rawArgs.entries)
+                entry.key.toString(): _adaptAstPartForV10(entry.value, context),
+            }
+          : <String, Object?>{};
+      return <String, Object?>{
+        '@call': part['call'],
+        'args': adaptedArgs,
+        'returnType': part['returnType'] ?? 'any',
+      };
+    }
+    return <String, Object?>{
+      for (final MapEntry<Object?, Object?> entry in part.entries)
+        entry.key.toString(): _adaptAstPartForV10(entry.value, context),
+    };
   }
 }

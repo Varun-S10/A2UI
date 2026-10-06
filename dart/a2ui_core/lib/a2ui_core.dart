@@ -12,6 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/// The A2UI core SDK: protocol messages, catalogs, reactive state models and
+/// payload validation, shared by renderers and agents.
+///
+/// Implements protocol v0.9, v0.9.1 and v1.0 message envelopes.
 library;
 
 // Protocol models.
@@ -20,22 +24,36 @@ export 'src/core/common.dart';
 export 'src/core/common_schemas.dart';
 export 'src/core/component_model.dart';
 // Rendering support.
-export 'src/core/contexts.dart';
+export 'src/core/contexts.dart' hide ComponentContext;
 // State management.
 export 'src/core/data_model.dart';
 export 'src/core/messages.dart';
 export 'src/core/minimal_catalog.dart';
+export 'src/core/renderer_capabilities.dart';
 export 'src/core/surface_group_model.dart';
 export 'src/core/surface_model.dart';
+export 'src/core/validation_result.dart';
 export 'src/primitives/cancellation.dart';
 export 'src/primitives/data_path.dart';
 export 'src/primitives/errors.dart';
 // Event notifications for discrete lifecycle events.
 export 'src/primitives/event_notifier.dart';
+// Protocol versions and version compatibility.
+export 'src/primitives/protocol_version.dart';
 // Reactivity (re-exports preact_signals primitives).
 export 'src/primitives/reactivity.dart';
+export 'src/primitives/semver.dart';
 export 'src/processing/basic_functions.dart';
 export 'src/processing/expressions.dart';
 // Processing & expressions.
 export 'src/processing/processor.dart';
-export 'src/rendering/binder.dart';
+export 'src/rendering/binder.dart' show ChildNode, maxDynamicChildListSize;
+export 'src/resolution/component_node.dart'
+    hide MutableComponentNode, sameValue;
+export 'src/resolution/node_resolver.dart';
+export 'src/resolution/resolved_binding.dart';
+// Payload validation. The component-graph and reference helpers behind the
+// validator stay package-private: `MessageProcessor` is the entry point, and
+// `PayloadValidator` checks one item against one catalog.
+export 'src/validation/validation_config.dart';
+export 'src/validation/validator.dart';

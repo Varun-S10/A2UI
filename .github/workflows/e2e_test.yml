@@ -15,6 +15,10 @@
 name: E2E Tests
 
 on:
+  # Lets the tests run on demand, for example on a PR branch, from the Actions
+  # tab or with `gh workflow run e2e_test.yml --ref <branch>`. PRs do not run
+  # them otherwise. A manual run does not file an issue when it fails.
+  workflow_dispatch:
   schedule:
     - cron: "0 0 * * *" # daily
 
@@ -43,7 +47,7 @@ jobs:
           fi
           echo "GEMINI_API_KEY has ${#GEMINI_API_KEY} characters"
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install uv
