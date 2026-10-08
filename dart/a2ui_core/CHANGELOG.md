@@ -2,10 +2,74 @@
 
 ## Unreleased
 
+- **Breaking:** `Catalog.fromJson` inlines and flattens `allOf` component envelopes (`ComponentCommon`, `CatalogComponentCommon`, `Checkable`), maps `accessibility` and `checks` mixins, omits envelope keys (`id`, `component`, `catalogId`) from `ComponentApi.schema`, and replaces `REF:` description prefixes in `CommonSchemas` with `commonTypesRef` metadata.
+- Adds `Catalog.protocolVersion`, `FunctionApi.description`, and `FunctionImplementation.description`, and updates `Catalog.catalogSchema` to rebuild component envelopes, emit `anyComponent.discriminator` and function `description`, and restore `common_types.json#/$defs/...` references.
+- Allows the `catalogId` envelope property during component validation in `PayloadValidator`.
+- Resolves local `#/...` pointers that are absent from the catalog document against `commonTypes` in `resolveSchemaRefs`.
+- Support non-ASCII data model keys in templates.
+- `A2uiVersionCapabilities.fromJson` throws `A2uiCatalogError` when `inlineCatalogs` is present but isn't an array, or contains an entry that isn't an object.
 - **Breaking:** `UpdateDataModelMessage` adds `hasValue` (defaulting to `true`) so `toJson()` emits `'value': null` for explicit null deletions while `fromJson()` distinguishes an omitted `value` from an explicit `null`.
 - **Breaking:** `SurfaceModel.dispatchAction` records action timestamps in UTC (`DateTime.now().toUtc()`) and `A2uiClientAction.toJson()` serializes timestamps in UTC (`timestamp.toUtc().toIso8601String()`) so serialized timestamps always end with `Z` per RFC 3339.
 - **Breaking:** `A2uiClientError` validates in its constructor (not only in debug assertions) that a `VALIDATION_FAILED` error provides a non-empty `path`, throwing `A2uiValidationError`.
 - `ComponentModel.toJson` writes `id` and `component` after the component's properties, so a property named `id` or `component` no longer replaces the model's own.
+- **Breaking:** Removed `DataPath`. `DataModel` parses JSON Pointers itself,
+  as web_core and the Python core do, and every path API (`get`, `set`,
+  `delete`, `hasPath`, `watch`) takes a `String`. Parsing validates RFC 6901
+  `~0`/`~1` escape sequences and rejects prototype-pollution segment names
+  (`__proto__`, `constructor`, `prototype`) with `A2uiDataError`.
+- **Breaking:** `DataModel` takes a modifiable deep copy of incoming data on
+  initialization and `set`, normalizing string-keyed maps (including untyped
+  `Map<dynamic, dynamic>`) to `Map<String, Object?>` and lists to
+  `List<Object?>` so external mutations do not alias internal state and
+  untyped maps are traversable.
+- Add `DataModel.delete`, `DataModel.hasPath`, and `DataModel.resolvePath`.
+- `EventNotifier.emit` isolates listener exceptions, logging them via
+  `Logger('a2ui.EventNotifier')` and continuing delivery to remaining
+  listeners.
+- Validate `DataBinding`, `FunctionCall`, `Action`, and `ChildListTemplate` fields during JSON deserialization (`A2uiValidationError`), preserve `reservedKeys` (`@path`/`@call`) and `catalogId` across `toJson` (the `@call` form omits `returnType`, which the v1.0 schema does not declare), default `FunctionCall.returnType` to `A2uiReturnType.any`, treat a non-list `checks` value as no rules (as web_core and the Python core do) and guard dynamic map casts against `TypeError`, and throw `A2uiStateError` from `ComponentContext.childContext` and `A2uiCatalogError` from `CatalogInvokerExtension.invoke`.
+- Add `isValidUax31Identifier` and `assertUax31Identifier` for UAX #31 identifier validation, `A2uiErrorDetail`, `cause` chaining on `A2uiError` subclasses, and `code`/`path`/`errors` on `A2uiValidationError`. `A2uiError` now takes `code` as a named parameter, and `A2uiValidationError` aligns its default code to `'VALIDATION_FAILED'`.
+- Add `Catalog.refMap`, a cached `ComponentRefMap` of each component type's
+  child-reference properties. `MessageProcessor` graph validation and
+  `NodeResolver` both read it, so a property the validator checks is one the
+  resolver mounts. `ComponentRefMap`, `RefFields` and the `RefKind` types
+  (`SingleRef`, `ListRef`, `NestedRef`) are now exported.
+- Recognize v1.0 `common_types.json#/$defs/Child` (and `#/$defs/Child`) as a
+  single child reference, for dangling-reference and orphan checks and for
+  resolution.
+- **Behavior change:** `NodeResolver` now mounts an unmarked string `child`
+  and string-array `children`, which graph validation already checked.
+  Previously such a catalog validated but rendered its children as plain ids.
+- **Behavior change:** a dangling id inside a child list is reported with its
+  index (`children[2]` rather than `children`), and only an object with both a
+  string `componentId` and a string `path` is read as a `ChildList` template.
+- **Breaking:** `MessageProcessor.validationConfig` is nullable and defaults
+  to `null`. Without a config the processor still rejects duplicate ids
+  within an `updateComponents` batch and checks declared component types and
+  themes against their catalog schemas, accepts undeclared types, and skips
+  the root, dangling-reference, reachability, cycle, depth and data-model
+  path checks, so a surface may arrive across several messages in any order.
+  `ValidationConfig.strict` is the opt-in to those checks.
+- **Behavior change:** under a `ValidationConfig`, `MessageProcessor` checks
+  the component graph on every `updateComponents` message rather than once
+  per payload. Each batch is applied to a copy of the surface's components
+  first, and the result must pass the root, dangling-reference, cycle, depth
+  and reachability checks the config's flags require before anything is
+  committed. A surface streamed across several messages under a config needs
+  `ValidationConfig.relaxed` or the individual `allow*` flags.
+- `ValidationConfig` adds `allowUnknownElements`, `targetVersion`,
+  `allowedMessages`, `rootId` and `maxDepth`. `ValidationConfig.relaxed` now
+  also sets `allowUnknownElements`.
+- An `updateComponents` entry that omits `component` is checked against the
+  existing component's type and catalog schema; its properties still replace
+  the existing ones.
+- `ComponentModel` adds `catalog` (the component's `catalogId`) and `metadata`,
+  and `properties` no longer holds `catalogId` or `metadata`. A component whose
+  `catalogId` changes is recreated, as for a change of type.
+- `SurfaceModel` adds `rootId`, defaulting to `root` or to
+  `ValidationConfig.rootId`, and `NodeResolver` roots the tree at it.
+- `SurfaceComponentsModel` adds `getAll()`, `has()`, `size`, `entries`, `keys`,
+  `values`, `getChildIds()`, `validateTopology()`, `detectCycles()`,
+  `validateReferences()` and `validateComponentsUpdate()`.
 - Added `ValidationResult` and `A2uiReturnType.validationResult` for structured
   client-side validation outcomes (`valid`, `message`, `code`, `severity`), and
   exposed `validationResults` alongside `isValid` and `validationErrors` on
@@ -65,7 +129,61 @@
   `@`-prefixed function names (such as `${@index()}` and
   `${@index(offset: 1)}`), and accept `~0` and `~1` JSON Pointer escapes inside
   `${}` paths while rejecting malformed `~` escapes and non-leading `@` tokens.
-- Add `DataContext.isDataBinding`, `DataContext.isFunctionCall`, and `DataContext.bindingFor` for protocol-version-aware binding and function-call detection; adapt `FormatStringFunction` parser AST nodes (`@path`/`@call`) in v1.0 mode, pre-build function argument signals outside `computed` in `DataContext.resolveListenable`, skip binding/call validation inside `updateDataModel.value` in `checkPathsAndRecursion`, and report unrecognized or invalid action payloads on `SurfaceModel.onError` with code `INVALID_ACTION`.
+- Added `BasicCatalog.v0_9()` and `BasicCatalog.v1_0()`, which carry the
+  basic catalog's 14 functions (`required`, `regex`, `length`, `numeric`,
+  `email`, `formatString`, `formatNumber`, `formatCurrency`, `formatDate`,
+  `pluralize`, `openUrl`, `and`, `or`, `not`). Each function's argument schema
+  and return type are read from an embedded copy of the published catalog
+  document, so they cannot drift from it. Components follow in a later
+  release.
+  - v0.9 validation rules return `bool`; v1.0 rules return a
+    `ValidationResult` with a failure message.
+  - In v1.0, `and`, `or`, and `not` read the validity of a `ValidationResult`
+    (or a map with a `valid` key) instead of treating every object as truthy,
+    so the v1.0 spec's nested `and(required, or(required, required))` check
+    blocks a submit when a field is empty. v0.9 keeps plain truthiness, since
+    its validators return booleans.
+  - Formatting uses `package:intl` for the `locale` argument (default
+    `en-US`). `formatDate` reads a timestamp without an offset as UTC, keeps
+    the wall-clock time of one with an offset, and emits the UTC instant for
+    the `ISO` pattern. It returns an empty string for a date that does not
+    exist, such as `2026-02-30`, instead of rolling it into the next month.
+  - `openUrl` accepts only absolute `http`, `https`, `mailto` and `tel` URLs
+    and passes them to an `OpenUrlCallback`. Without a callback it throws,
+    which a binder reports as `EXECUTION_ERROR`.
+  - The embedded v1.0 document matches `catalogs/basic/v1/catalog.json`,
+    whose instruction examples write bindings and calls as `@path` and
+    `@call`.
+- `FormatStringFunction` now delegates to the basic catalog's `formatString`:
+  it coerces a non-string `value` instead of throwing, renders integral
+  doubles without `.0`, and resolves template bindings and calls on a v1.0
+  surface.
+- Added a conformance runner for `conformance/core/functions.yaml`. Its
+  `validate` cases are skipped until basic-catalog components and v1.0
+  message processing land.
+- Added `ValidationResult` and `A2uiReturnType.validationResult` for structured
+  client-side validation outcomes (`valid`, `message`, `code`, `severity`), and
+  exposed `validationResults` alongside `isValid` and `validationErrors` on
+  resolved component properties. `A2uiReturnType.validationResult` is an
+  API-level value; the v0.9 `CommonSchemas.functionCall` wire schema still
+  accepts only the seven v0.9 return types. `ValidationResult.validityOf`
+  exposes the rule the binder uses to read a check result's validity.
+- Fixed `checks` evaluation in `GenericBinder`:
+  - Rules evaluate once during initial binding without a duplicate object-branch
+    pass.
+  - `_subscribe` skips invoking its reactive callback during the initial
+    synchronous pass so rebuilds do not write into stale property maps.
+  - Non-map rule entries emit a `VALIDATION_FAILED` client error on the surface
+    instead of throwing a `TypeError`.
+  - Checkable properties are classified from schema markers or `CheckRule` item
+    structure rather than matching the property name `'checks'`.
+- `ReferenceSchemaReader` resolves external `common_types.json#/$defs/...`
+  pointers against the `common_types.json` document the caller supplies (the
+  embedded v0.9 document by default) so catalogs loaded via `Catalog.fromJson`
+  classify `Checkable`, `DynamicValue`, `Action`, and `ChildList` properties
+  identically to code-constructed catalogs. `extractRefFields` forwards the
+  same optional `commonTypes` document.
+- Add `DataContext.isDataBinding`, `DataContext.isFunctionCall`, `DataContext.bindingFor`, and `DataContext.adaptExpressionPart` for protocol-version-aware binding and function-call detection; adapt `FormatStringFunction` parser AST nodes (`@path`/`@call`) in v1.0 mode, pre-build function argument signals outside `computed` in `DataContext.resolveListenable`, skip binding/call validation inside `updateDataModel.value` in `checkPathsAndRecursion`, and report unrecognized or invalid action payloads on `SurfaceModel.onError` with code `INVALID_ACTION`.
 - Add `DataContext.resolveAction` method for resolving dynamic values inside action payloads.
 - Added `actions_conformance_test.dart` running the shared `conformance/core/actions.yaml` suite.
 - `FormatStringFunction` coerces null expression arguments to empty strings and encodes maps and lists as JSON.

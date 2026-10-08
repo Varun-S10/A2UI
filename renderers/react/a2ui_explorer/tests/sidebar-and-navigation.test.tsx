@@ -28,6 +28,13 @@ describe('React Explorer Sidebars & Navigation', () => {
     await cleanup();
   });
 
+  it('should render combined header with A2UI React Explorer title and example info in right panel', () => {
+    const brandTitle = container.querySelector('[class*="previewHeader"] h1');
+    expect(brandTitle?.textContent).toBe('A2UI React Explorer');
+    expect(container.querySelector('header')).toBeNull();
+    expect(container.querySelector('[class*="inspectorPaneHeader"] h2')?.textContent).toBeTruthy();
+  });
+
   it('should toggle left sidebar collapse and expand', async () => {
     const navPane = container.querySelector('[class*="navPane"]') as HTMLElement;
     const collapseBtn = container.querySelector('[class*="collapseLeftBtn"]') as HTMLButtonElement;
@@ -101,5 +108,48 @@ describe('React Explorer Sidebars & Navigation', () => {
     });
 
     expect(getActiveTitle()).toEqual(initialTitle);
+  });
+
+  it('should switch between v0.9 and v1.0 galleries using the version selector buttons', async () => {
+    const versionBtns = Array.from(
+      container.querySelectorAll('[class*="versionBtn"]'),
+    ) as HTMLButtonElement[];
+    expect(versionBtns.length).toBe(2);
+
+    const v10Btn = versionBtns.find(btn => btn.textContent?.trim() === 'v1.0');
+    expect(v10Btn).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      v10Btn!.click();
+      await whenSettled();
+    });
+
+    const updatedBtns = Array.from(
+      container.querySelectorAll('[class*="versionBtn"]'),
+    ) as HTMLButtonElement[];
+    const updatedV10Btn = updatedBtns.find(btn => btn.textContent?.trim() === 'v1.0');
+    expect(updatedV10Btn?.className).toContain('versionBtnActive');
+    const navItems = container.querySelectorAll('[class*="navItem"]');
+    expect(navItems.length).toBeGreaterThan(0);
+  });
+
+  it('should fold and unfold inspector sections', async () => {
+    const surfaceSection = container.querySelector('[class*="surfaceSection"]') as HTMLElement;
+    const surfaceHeader = surfaceSection.querySelector('[class*="inspectorHeader"]') as HTMLElement;
+    expect(surfaceSection.className).not.toContain('folded');
+
+    await act(async () => {
+      surfaceHeader.click();
+      await whenSettled();
+    });
+
+    expect(surfaceSection.className).toContain('folded');
+
+    await act(async () => {
+      surfaceHeader.click();
+      await whenSettled();
+    });
+
+    expect(surfaceSection.className).not.toContain('folded');
   });
 });
