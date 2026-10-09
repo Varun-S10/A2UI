@@ -128,13 +128,7 @@ export function sanitizeMediaUrl(urlInput: unknown): string | undefined {
     return undefined;
   }
 
-  const baseHref =
-    typeof window !== 'undefined' &&
-    typeof window.location !== 'undefined' &&
-    window.location.href &&
-    window.location.href !== 'about:blank'
-      ? window.location.href
-      : 'https://example.invalid/';
+  const baseHref = 'https://example.invalid/';
 
   let parsed: URL;
   try {
