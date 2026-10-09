@@ -113,3 +113,39 @@ function renderNode(node: ComponentNode) {
   }
   return a2uiElement(implementation.tagName, node.context, node);
 }
+
+/**
+ * Validates that a media URL uses an allowed `http:` or `https:` scheme
+ * (including relative URLs resolved against an `http(s)` base location).
+ * Returns the trimmed URL string if valid, or `undefined` if disallowed or invalid.
+ */
+export function sanitizeMediaUrl(urlInput: unknown): string | undefined {
+  if (typeof urlInput !== 'string') {
+    return undefined;
+  }
+  const trimmed = urlInput.trim();
+  if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('\\\\')) {
+    return undefined;
+  }
+
+  const baseHref =
+    typeof window !== 'undefined' &&
+    typeof window.location !== 'undefined' &&
+    window.location.href &&
+    window.location.href !== 'about:blank'
+      ? window.location.href
+      : 'https://example.invalid/';
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed, baseHref);
+  } catch {
+    return undefined;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return undefined;
+  }
+
+  return trimmed;
+}
