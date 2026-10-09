@@ -158,4 +158,15 @@ describe('ListComponent', () => {
     const list = fixture.nativeElement.querySelector('.a2ui-list') as HTMLElement;
     expect(list.style.alignItems).toBe('center');
   });
+
+  it('should default unrecognized align property to stretch', () => {
+    setComponentProps(fixture, {
+      ...defaultProps,
+      children: createBoundProperty([{id: 'child-1', basePath: '/'}]),
+      align: createBoundProperty('invalid' as 'start' | 'center' | 'end' | 'stretch' | undefined),
+    } as any);
+    fixture.detectChanges();
+    const list = fixture.nativeElement.querySelector('.a2ui-list') as HTMLElement;
+    expect(list.style.alignItems).toBe('stretch');
+  });
 });

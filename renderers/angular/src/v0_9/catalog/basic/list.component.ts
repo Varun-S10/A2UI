@@ -112,7 +112,7 @@ export class ListComponent extends BasicCatalogComponent<typeof ListApi> {
   readonly direction = computed(() => this.props()['direction']?.value() || 'vertical');
   readonly align = computed(() => {
     const val = this.props()['align']?.value();
-    return val ? ALIGN_MAP[val] || val : null;
+    return val ? ALIGN_MAP[val] || 'stretch' : null;
   });
   readonly children = computed(() => this.props()['children'].value());
 
