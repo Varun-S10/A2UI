@@ -23,96 +23,12 @@ import {effect} from 'signal-utils/subtle/microtask-effect';
 import {A2uiMessageProcessor} from '@a2ui/web_core/data/model-processor';
 import {StringValue} from '@a2ui/web_core/types/primitives';
 import {AnyComponentNode, SurfaceID, Theme} from '@a2ui/web_core/types/types';
+import {applyCustomElementProperties} from '@a2ui/web_core/universal';
 import {themeContext} from './context/theme.js';
 import {structuralStyles} from './styles.js';
 import {componentRegistry} from './component-registry.js';
 
 type NodeOfType<T extends AnyComponentNode['type']> = Extract<AnyComponentNode, {type: T}>;
-
-const BLOCKED_CUSTOM_ELEMENT_PROPS = new Set<string>([
-  '__proto__',
-  'constructor',
-  'prototype',
-  'innerHTML',
-  'outerHTML',
-  'innerText',
-  'outerText',
-  'textContent',
-  'srcdoc',
-  'is',
-  'formaction',
-  'formAction',
-  'href',
-  'src',
-  'style',
-  'dataset',
-  'attributes',
-  'className',
-  'classList',
-  'part',
-  'shadowRoot',
-  'id',
-  'slot',
-  'component',
-  'weight',
-  'processor',
-  'surfaceId',
-  'surface',
-  'dataContextPath',
-  'childComponents',
-  'enableCustomElements',
-  'theme',
-  'renderOptions',
-  'renderRoot',
-  'isUpdatePending',
-  'hasUpdated',
-  'updateComplete',
-]);
-
-const BASE_ELEMENT_PROTOTYPES = new Set<object>([
-  LitElement.prototype,
-  Object.getPrototypeOf(LitElement.prototype),
-  HTMLElement.prototype,
-  Element.prototype,
-  Node.prototype,
-  EventTarget.prototype,
-  Object.prototype,
-]);
-
-function isSafeCustomProperty(prop: string): boolean {
-  if (!prop || BLOCKED_CUSTOM_ELEMENT_PROPS.has(prop)) {
-    return false;
-  }
-  const lower = prop.toLowerCase();
-  if (
-    lower.startsWith('on') ||
-    lower.startsWith('data-') ||
-    prop.startsWith('_') ||
-    prop.startsWith('#')
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function getSchemaAllowedProperties(schema: unknown): Set<string> | null {
-  if (
-    schema &&
-    typeof schema === 'object' &&
-    'properties' in schema &&
-    schema.properties &&
-    typeof schema.properties === 'object'
-  ) {
-    const allowed = new Set<string>();
-    for (const key of Object.keys(schema.properties)) {
-      if (isSafeCustomProperty(key)) {
-        allowed.add(key);
-      }
-    }
-    return allowed;
-  }
-  return null;
-}
 
 // This is the base class all the components will inherit
 @customElement('a2ui-root')
@@ -572,7 +488,6 @@ export class Root extends SignalWatcher(LitElement) {
   private instantiateCustomElement(component: AnyComponentNode, elCtor: CustomElementConstructor) {
     const node = component as AnyComponentNode;
     const el = new elCtor() as Root;
-    const allowedProps = this.getAllowedCustomProperties(component.type, elCtor, el);
 
     el.id = node.id;
     if (node.slotName) {
@@ -584,105 +499,13 @@ export class Root extends SignalWatcher(LitElement) {
     el.surfaceId = this.surfaceId;
     el.dataContextPath = node.dataContextPath ?? '/';
 
-    if (component.properties && typeof component.properties === 'object') {
-      for (const [prop, val] of Object.entries(component.properties)) {
-        if (!isSafeCustomProperty(prop) || !allowedProps.has(prop)) {
-          continue;
-        }
-        (el as unknown as Record<string, unknown>)[prop] = val;
-      }
-    }
+    const schema = componentRegistry.getSchema(component.type, elCtor);
+    applyCustomElementProperties(el, component.properties, {
+      elCtor,
+      baseCtor: Root,
+      schema,
+    });
     return html`${el}`;
-  }
-
-  private getAllowedCustomProperties(
-    typeName: string,
-    elCtor: CustomElementConstructor,
-    el: HTMLElement,
-  ): Set<string> {
-    const schema = componentRegistry.getSchema(typeName, elCtor);
-    const schemaAllowed = getSchemaAllowedProperties(schema);
-    if (schemaAllowed !== null) {
-      return schemaAllowed;
-    }
-
-    const allowed = new Set<string>();
-    (Root as unknown as {finalize?: () => void}).finalize?.();
-    (elCtor as unknown as {finalize?: () => void}).finalize?.();
-
-    const rootElementProps = (Root as unknown as {elementProperties?: Map<PropertyKey, unknown>})
-      .elementProperties;
-    const ctorElementProps = (
-      elCtor as unknown as {elementProperties?: Map<PropertyKey, {state?: boolean}>}
-    ).elementProperties;
-
-    const stateProps = new Set<string>();
-    if (ctorElementProps instanceof Map) {
-      for (const [key, decl] of ctorElementProps.entries()) {
-        if (typeof key !== 'string') continue;
-        if (decl?.state) {
-          stateProps.add(key);
-          continue;
-        }
-        if (rootElementProps?.has(key)) {
-          continue;
-        }
-        if (isSafeCustomProperty(key)) {
-          allowed.add(key);
-        }
-      }
-    }
-
-    const rootObserved = new Set<string>(
-      (Root as unknown as {observedAttributes?: string[]}).observedAttributes ?? [],
-    );
-    const observedAttrs = (elCtor as unknown as {observedAttributes?: unknown}).observedAttributes;
-    if (Array.isArray(observedAttrs)) {
-      for (const attr of observedAttrs) {
-        if (
-          typeof attr === 'string' &&
-          !rootObserved.has(attr) &&
-          !stateProps.has(attr) &&
-          isSafeCustomProperty(attr)
-        ) {
-          allowed.add(attr);
-        }
-      }
-    }
-
-    if (!(el instanceof LitElement) || allowed.size === 0) {
-      const rootMixinProto = Object.getPrototypeOf(Root.prototype);
-      let proto = elCtor.prototype;
-      while (
-        proto &&
-        proto !== Root.prototype &&
-        proto !== rootMixinProto &&
-        !BASE_ELEMENT_PROTOTYPES.has(proto)
-      ) {
-        for (const [key, desc] of Object.entries(Object.getOwnPropertyDescriptors(proto))) {
-          if (stateProps.has(key) || rootElementProps?.has(key) || !isSafeCustomProperty(key)) {
-            continue;
-          }
-          if (
-            typeof desc.set === 'function' ||
-            ('value' in desc && typeof desc.value !== 'function')
-          ) {
-            allowed.add(key);
-          }
-        }
-        proto = Object.getPrototypeOf(proto);
-      }
-    }
-
-    if (!(el instanceof LitElement)) {
-      for (const key of Object.getOwnPropertyNames(el)) {
-        if (!stateProps.has(key) && !rootElementProps?.has(key) && isSafeCustomProperty(key)) {
-          allowed.add(key);
-        }
-      }
-    }
-
-    return allowed;
   }
 
   override render(): TemplateResult | typeof nothing {
