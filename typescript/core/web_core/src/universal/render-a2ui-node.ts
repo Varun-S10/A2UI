@@ -115,7 +115,7 @@ function renderNode(node: ComponentNode) {
 }
 
 /**
- * Validates that a media URL uses an allowed `http:` or `https:` scheme
+ * Validates that a media URL uses an allowed `http:`, `https:`, or `data:` scheme
  * (including relative URLs resolved against an `http(s)` base location).
  * Returns the trimmed URL string if valid, or `undefined` if disallowed or invalid.
  */
@@ -137,7 +137,7 @@ export function sanitizeMediaUrl(urlInput: unknown): string | undefined {
     return undefined;
   }
 
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:' && parsed.protocol !== 'data:') {
     return undefined;
   }
 

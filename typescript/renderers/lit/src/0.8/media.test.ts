@@ -56,7 +56,7 @@ describe('0.8 Media Components URL Scheme Validation', () => {
 
   after(teardownTestDom);
 
-  it('allows http and https URLs on Image, Video, and Audio', async () => {
+  it('allows http, https, and data URLs on Image, Video, and Audio', async () => {
     const imgEl = document.createElement('a2ui-image') as Image;
     imgEl.theme = mockTheme;
     mountedElements.push(imgEl);
@@ -68,6 +68,13 @@ describe('0.8 Media Components URL Scheme Validation', () => {
       imgEl.shadowRoot?.querySelector('img')?.getAttribute('src'),
       'https://example.com/photo.png',
     );
+
+    const dataImgUrl =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+    await asyncUpdate(imgEl, (e: Image) => {
+      e.url = {literalString: dataImgUrl};
+    });
+    assert.strictEqual(imgEl.shadowRoot?.querySelector('img')?.getAttribute('src'), dataImgUrl);
 
     const vidEl = document.createElement('a2ui-video') as Video;
     vidEl.theme = mockTheme;
@@ -97,7 +104,7 @@ describe('0.8 Media Components URL Scheme Validation', () => {
   it('blocks disallowed URL schemes on Image, Video, and Audio', async () => {
     const disallowedUrls = [
       'javascript:alert(1)',
-      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>',
+      'vbscript:msgbox(1)',
       'file:///etc/passwd',
       'blob:https://example.com/123',
       '//evil.example.com/resource',
