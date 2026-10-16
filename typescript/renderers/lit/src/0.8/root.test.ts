@@ -17,12 +17,14 @@
 
 import {setupTestDom, teardownTestDom, asyncUpdate} from '../tests/dom-setup.js';
 import assert from 'node:assert';
-import {describe, it, after, before} from 'node:test';
+import {describe, it, afterEach, before} from 'node:test';
 import {LitElement, html} from 'lit';
-import {property, state} from 'lit/decorators.js';
+import {property, query, state} from 'lit/decorators.js';
 
 describe('0.8 Root Custom Component Property Filtering', () => {
   let Root: typeof import('./ui/root.js').Root;
+  let applyCustomElementProperties: typeof import('./ui/root.js').applyCustomElementProperties;
+  let getAllowedCustomProperties: typeof import('./ui/root.js').getAllowedCustomProperties;
   let componentRegistry: typeof import('./ui/component-registry.js').componentRegistry;
 
   before(async () => {
@@ -30,6 +32,8 @@ describe('0.8 Root Custom Component Property Filtering', () => {
     const rootMod = await import('./ui/root.js');
     const registryMod = await import('./ui/component-registry.js');
     Root = rootMod.Root;
+    applyCustomElementProperties = rootMod.applyCustomElementProperties;
+    getAllowedCustomProperties = rootMod.getAllowedCustomProperties;
     componentRegistry = registryMod.componentRegistry;
 
     class SchemaBackedWidget extends Root {
@@ -83,7 +87,7 @@ describe('0.8 Root Custom Component Property Filtering', () => {
     );
   });
 
-  after(teardownTestDom);
+  afterEach(teardownTestDom);
 
   it('assigns allowed schema properties while blocking DOM sinks and unexposed properties', async () => {
     const root = document.createElement('a2ui-root') as InstanceType<typeof Root>;
@@ -145,8 +149,6 @@ describe('0.8 Root Custom Component Property Filtering', () => {
     assert.strictEqual(widget.id, 'widget-1');
     assert.strictEqual(widget.slot, 'header');
     assert.strictEqual(widget.dataContextPath, '/');
-
-    document.body.removeChild(root);
   });
 
   it('assigns declared @property fields on schema-less custom elements while blocking @state and DOM sinks', async () => {
@@ -181,8 +183,6 @@ describe('0.8 Root Custom Component Property Filtering', () => {
     assert.strictEqual(widget.innerHTML, '');
     assert.strictEqual(widget.onmouseover, null);
     assert.strictEqual(widget.undeclaredProp, undefined);
-
-    document.body.removeChild(root);
   });
 
   it('applies the same allowlist and denylist in renderCustomComponent', () => {
@@ -207,5 +207,104 @@ describe('0.8 Root Custom Component Property Filtering', () => {
     assert.strictEqual(renderedEl.innerHTML, '');
     assert.strictEqual(renderedEl.srcdoc, undefined);
     assert.strictEqual(renderedEl.surfaceId, 'trusted-surface');
+  });
+
+  it('does not expose @query or internal auto-accessor setters on zero-input LitElement subclasses', () => {
+    class ZeroInputLitWidget extends LitElement {
+      @query('iframe')
+      accessor iframe!: HTMLIFrameElement;
+
+      accessor internalAccessor = 'keep-internal';
+    }
+    if (!customElements.get('a2ui-test-zero-input-lit')) {
+      customElements.define('a2ui-test-zero-input-lit', ZeroInputLitWidget);
+    }
+
+    const el = new ZeroInputLitWidget();
+    const allowed = getAllowedCustomProperties(el, {
+      elCtor: ZeroInputLitWidget,
+      baseCtor: Root,
+    });
+    assert.strictEqual(allowed.size, 0);
+
+    applyCustomElementProperties(
+      el,
+      {
+        iframe: 'overwritten',
+        internalAccessor: 'tampered',
+      },
+      {elCtor: ZeroInputLitWidget, baseCtor: Root},
+    );
+    assert.strictEqual(el.internalAccessor, 'keep-internal');
+  });
+
+  it('does not expose own instance fields on non-LitElement custom elements with declared observedAttributes', () => {
+    class ObservedAttrElement extends HTMLElement {
+      static observedAttributes = ['publicAttr'];
+      publicAttr = 'initial';
+      internalField = 'safe-field';
+    }
+    if (!customElements.get('a2ui-test-observed-attr-el')) {
+      customElements.define('a2ui-test-observed-attr-el', ObservedAttrElement);
+    }
+
+    const el = new ObservedAttrElement();
+    const firstAllowed = getAllowedCustomProperties(el, {
+      elCtor: ObservedAttrElement,
+      baseCtor: Root,
+    });
+    const secondAllowed = getAllowedCustomProperties(el, {
+      elCtor: ObservedAttrElement,
+      baseCtor: Root,
+    });
+    assert.strictEqual(firstAllowed, secondAllowed);
+    assert.strictEqual(firstAllowed.has('publicAttr'), true);
+    assert.strictEqual(firstAllowed.has('internalField'), false);
+
+    applyCustomElementProperties(
+      el,
+      {
+        publicAttr: 'updated',
+        internalField: 'tampered',
+      },
+      {elCtor: ObservedAttrElement, baseCtor: Root},
+    );
+    assert.strictEqual(el.publicAttr, 'updated');
+    assert.strictEqual(el.internalField, 'safe-field');
+  });
+
+  it('does not return a stale or sibling schema when a typeName is registered without a schema', () => {
+    class SharedRegistryWidget extends LitElement {}
+    componentRegistry.register(
+      'SharedWithSchema',
+      SharedRegistryWidget,
+      'a2ui-test-shared-registry-widget',
+      {
+        type: 'object',
+        properties: {allowedBySchema: {type: 'string'}},
+      },
+    );
+    componentRegistry.register(
+      'SharedWithoutSchema',
+      SharedRegistryWidget,
+      'a2ui-test-shared-registry-widget',
+    );
+
+    assert.ok(componentRegistry.getSchema('SharedWithSchema', SharedRegistryWidget));
+    assert.strictEqual(
+      componentRegistry.getSchema('SharedWithoutSchema', SharedRegistryWidget),
+      undefined,
+    );
+
+    // Re-registering SharedWithSchema without a schema clears the previous schema
+    componentRegistry.register(
+      'SharedWithSchema',
+      SharedRegistryWidget,
+      'a2ui-test-shared-registry-widget',
+    );
+    assert.strictEqual(
+      componentRegistry.getSchema('SharedWithSchema', SharedRegistryWidget),
+      undefined,
+    );
   });
 });
