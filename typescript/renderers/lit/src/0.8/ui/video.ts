@@ -19,7 +19,7 @@ import {customElement, property} from 'lit/decorators.js';
 import {Root} from './root.js';
 import {A2uiMessageProcessor} from '@a2ui/web_core/data/model-processor';
 import * as Primitives from '@a2ui/web_core/types/primitives';
-import {sanitizeMediaUrl} from '@a2ui/web_core/universal';
+import {sanitizeMediaUrl} from '@a2ui/web_core';
 import {classMap} from 'lit/directives/class-map.js';
 import {styleMap} from 'lit/directives/style-map.js';
 import {structuralStyles} from './styles.js';

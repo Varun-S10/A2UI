@@ -176,6 +176,10 @@ describe('Image Component', () => {
       'file:///etc/passwd',
       'blob:https://example.com/123',
       '//evil.example.com/pixel.png',
+      '/\\evil.example.com/pixel.png',
+      '/\t/evil.example.com/pixel.png',
+      'http:evil.example.com/pixel.png',
+      'https:evil.example.com/pixel.png',
     ];
 
     const el = document.createElement('a2ui-image') as A2uiWebComponentElement;

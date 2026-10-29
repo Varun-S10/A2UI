@@ -108,6 +108,10 @@ describe('0.8 Media Components URL Scheme Validation', () => {
       'file:///etc/passwd',
       'blob:https://example.com/123',
       '//evil.example.com/resource',
+      '/\\evil.example.com/resource',
+      '/\t/evil.example.com/resource',
+      'http:evil.example.com/resource',
+      'https:evil.example.com/resource',
     ];
 
     const imgEl = document.createElement('a2ui-image') as Image;

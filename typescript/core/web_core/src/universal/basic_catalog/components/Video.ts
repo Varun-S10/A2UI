@@ -15,7 +15,7 @@
  */
 
 import {html, nothing, css} from 'lit';
-import {sanitizeMediaUrl} from '../../index.js';
+import {sanitizeMediaUrl} from '../../../common/sanitize_media_url.js';
 import {BasicCatalogA2uiLitElement} from './basic-catalog-a2ui-lit-element.js';
 import type {VideoSupportedApis} from './supported_apis.js';
 

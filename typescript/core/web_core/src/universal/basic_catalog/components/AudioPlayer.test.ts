@@ -138,6 +138,10 @@ describe('AudioPlayer Component', () => {
       'file:///etc/passwd',
       'blob:https://example.com/123',
       '//evil.example.com/audio.mp3',
+      '/\\evil.example.com/audio.mp3',
+      '/\t/evil.example.com/audio.mp3',
+      'http:evil.example.com/audio.mp3',
+      'https:evil.example.com/audio.mp3',
     ];
 
     const el = document.createElement('a2ui-audioplayer') as A2uiWebComponentElement;
