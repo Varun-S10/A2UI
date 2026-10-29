@@ -31,10 +31,7 @@ void main() {
     final List<Map<String, Object?>> cases = loadSuite(path);
     test('suite is not empty', () => expect(cases, isNotEmpty));
     for (final testCase in cases) {
-      test(
-        testCase['name']! as String,
-        () => version.run(() => _runCase(testCase, version)),
-      );
+      test(testCase['name']! as String, () => _runCase(testCase, version));
     }
   });
 }
@@ -73,7 +70,9 @@ Object? _perform(Map<String, Object?> testCase, SuiteVersion version) {
     case 'create_format':
       return null;
     case 'compile':
-      return version.messagesJson(format.createParser().compile(input!));
+      return version.messagesJson(
+        compileChecked(format.createParser(), input!),
+      );
     case 'decompile':
       return format.createParser().decompile(
         version.messages(testCase['messages']! as List<Object?>),
@@ -101,10 +100,10 @@ void _checkDecompiled(
     expect(output, isNot(contains(text)));
   }
   if (testCase['expect_round_trip'] == true) {
-    final List<AgentToRendererMessage> recompiled = _format(
-      testCase,
-      version,
-    ).createParser().compile(output);
+    final List<AgentToRendererMessage> recompiled = compileChecked(
+      _format(testCase, version).createParser(),
+      output,
+    );
     expect(
       version.messagesJson(recompiled),
       testCase['messages'],

@@ -43,7 +43,11 @@ def test_component_model_lifecycle():
     comp.on_updated.subscribe(lambda c: events.append(c))
 
     assert comp.properties == {"label": "Click"}
-    assert comp.component_tree == {"id": "c1", "component": "Button", "label": "Click"}
+    assert comp.component_tree == {
+        "id": "c1",
+        "component": "Button",
+        "label": "Click",
+    }
 
     comp.properties = {"label": "Submit", "disabled": True}
     assert len(events) == 1
@@ -107,7 +111,7 @@ def test_component_model_get_child_references_with_custom_schema():
 
     custom_cat = Catalog(
         catalog_id="https://a2ui.org/custom-slots",
-        protocol_version="v1.0",
+        protocol_version="1.0",
         components=[
             ComponentApi(
                 name="SplitPane",
@@ -550,7 +554,7 @@ def test_surface_model_resolve_catalog_without_default():
         "s1",
         default_catalog=None,
         available_catalogs={cat.id: cat},
-        protocol_version="v1.0",
+        protocol_version="1.0",
     )
 
     assert surface.resolve_catalog(cat.id) is cat
@@ -650,6 +654,31 @@ def test_surface_components_model_duplicate_rejection():
 
     with pytest.raises(A2uiStateError, match="already exists"):
         scm.add_component(ComponentModel("c1", "Text", cat, {}))
+    with pytest.raises(A2uiStateError, match="already exists"):
+        scm.insert_component(0, ComponentModel("c1", "Text", cat, {}))
+
+
+def test_surface_components_model_insert_component_at_a_position():
+    cat = BasicCatalog("0.9")
+    scm = SurfaceComponentsModel(default_catalog=cat)
+    created: list[str] = []
+    scm.on_created.subscribe(lambda c: created.append(c.id))
+    keys = scm.keys
+    scm.add_component(ComponentModel("a", "Text", cat, {}))
+    scm.add_component(ComponentModel("c", "Text", cat, {}))
+
+    inserted = ComponentModel("b", "Text", cat, {"text": "hello"})
+    scm.insert_component(1, inserted)
+    scm.insert_component(0, ComponentModel("first", "Text", cat, {}))
+    scm.insert_component(99, ComponentModel("last", "Text", cat, {}))
+
+    # The view taken before the inserts sees them.
+    assert list(keys) == ["first", "a", "b", "c", "last"]
+    assert scm.get("b") is inserted
+    assert created == ["a", "c", "b", "first", "last"]
+    # An inserted component is tracked like an added one.
+    scm.remove_component("b")
+    assert list(keys) == ["first", "a", "c", "last"]
 
 
 def test_surface_components_model_child_references():

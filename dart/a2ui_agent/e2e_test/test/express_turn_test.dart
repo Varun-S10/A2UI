@@ -23,21 +23,17 @@ import 'test_infra/basic_catalog.dart';
 import 'test_infra/login_form.dart';
 
 void main() {
-  for (final MapEntry(key: A2uiProtocolVersion version, value: String? skip)
-      in turnVersions.entries) {
+  for (final A2uiProtocolVersion version in turnVersions) {
     // Follows the steps of `a2ui_agent/example/a2ui_agent_example.dart`.
-    test(
+    modelTest(
       '${version.jsonValue}: an Express agent turn produces a surface the '
       'renderer accepts',
-      skip: skip,
       () async {
         final CatalogApi catalog = loadBasicCatalog(version);
 
         // 1. At agent startup: register the catalogs the agent supports.
-        final generator = A2uiGenerator(
-          catalogs: [CatalogConfig(catalog)],
-          inferenceFormatFactory: const ExpressFormatFactory(),
-        );
+        // Express is the default format, so the generator names none.
+        final generator = A2uiGenerator(catalogs: [CatalogConfig(catalog)]);
 
         // 2. Per request: negotiate with the renderer's capabilities.
         final A2uiRequestProcessor processor = generator.createProcessor(

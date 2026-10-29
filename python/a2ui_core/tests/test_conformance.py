@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Callable
 from typing import Any
 import pytest
 import yaml
@@ -33,7 +34,11 @@ from a2ui.core.processing import (
     MessageProcessor,
     MessageProcessorOptions,
 )
-from a2ui.core.validation import STRICT_VALIDATION, PayloadValidator
+from a2ui.core.validation import (
+    RELAXED_VALIDATION,
+    STRICT_VALIDATION,
+    PayloadValidator,
+)
 from a2ui.core.exceptions import (
     A2uiCatalogError,
     A2uiDataError,
@@ -68,7 +73,27 @@ SUPPORTED_PROTOCOL_VERSIONS = {
     "1.0",
 }
 
-SKIP_TEST_NAMES: set[str] = set()
+SKIP_TEST_NAMES: set[str] = {
+    # A known difference of the Python core: its topology checks read a v0.8
+    # string property as a child reference when it names a component the
+    # surface holds, which the TypeScript and Kotlin cores do not.
+    "test_v08_topology_plain_string_property_not_treated_as_child_ref",
+    "test_v08_topology_plain_string_property_does_not_close_cycle",
+    # Catalog.derive and the per-call validation config of
+    # ExecutionContext are not ported to Python yet:
+    # https://github.com/a2ui-project/a2ui/issues/3699
+    "test_v10_catalog_derive_keeps_named_entries",
+    "test_v10_catalog_derive_adds_and_replaces_entries",
+    "test_v10_catalog_derive_keeps_every_entry_of_an_omitted_list",
+    "test_v10_catalog_derive_drops_fields_that_describe_the_source",
+    "test_v10_catalog_derive_sets_instructions",
+    "test_v10_catalog_derive_unknown_component_error",
+    "test_v10_catalog_derive_unknown_function_error",
+    "test_v09_catalog_derive_keeps_protocol_version",
+    "test_v10_call_validation_config_relaxes_strict_processor",
+    "test_v10_call_validation_config_tightens_permissive_processor",
+    "test_v10_call_validation_config_leaves_out_rules_as_strict",
+}
 
 # Transition skip list containing specific test suite files or basenames to skip entirely.
 SKIP_TEST_SUITES: set[str] = set()
@@ -85,6 +110,11 @@ UNRUNNABLE_SUITES: dict[str, str] = {
     ),
     "core/node_resolution.yaml": "The Python core has no node resolution layer.",
 }
+
+# Actions that time an operation rather than check what it returns. Their cases
+# run in `test_conformance_timing`, which is marked `performance` and so runs
+# only under `uv run pytest -m performance` (see timing_harness.py).
+TIMING_ACTIONS = {"measure_growth", "measure_overhead"}
 
 # Root core conformance directory resolution
 CONFORMANCE_ROOT = os.environ.get(
@@ -147,7 +177,7 @@ def resolve_protocol_version(case: dict[str, Any]) -> str | None:
     if "v09" in cat_id or "v0_9" in cat_id:
         return "v0.9"
     if "v10" in cat_id or "v1_0" in cat_id or "v1.0" in cat_id:
-        return "v1.0"
+        return "1.0"
     return "v0.9"
 
 
@@ -230,17 +260,17 @@ def get_catalogs_for_test_case(case: dict[str, Any]) -> list[Any]:
     version = resolve_protocol_version(case) or "v0.9"
     cur_basic = (
         v10_catalog
-        if version == "v1.0"
+        if version in ("1.0", "v1.0")
         else (v08_catalog if version == "v0.8" else v09_catalog)
     )
     v10_basic_alias = Catalog(
         catalog_id="basic",
-        protocol_version="v1.0",
+        protocol_version="1.0",
         components=list(v10_catalog.components.values()),
         functions=list(v10_catalog.functions.values()),
     )
 
-    if version == "v1.0":
+    if version in ("1.0", "v1.0"):
         catalogs_map["basic"] = v10_basic_alias
 
     def add_catalog_id(cat_id: str, ver: str | None = None):
@@ -549,7 +579,13 @@ def assert_raises(expect_error: Any):
         )
 
 
-CONFORMANCE_CASES = load_conformance_cases()
+ALL_CONFORMANCE_CASES = load_conformance_cases()
+CONFORMANCE_CASES = [
+    c for c in ALL_CONFORMANCE_CASES if c[2].get("action") not in TIMING_ACTIONS
+]
+TIMING_CASES = [
+    c for c in ALL_CONFORMANCE_CASES if c[2].get("action") in TIMING_ACTIONS
+]
 
 
 def test_all_suites_load() -> None:
@@ -623,6 +659,60 @@ def test_conformance_suite(test_id: str, rel_path: str, case: dict[str, Any]) ->
             f"Action '{action}' has no handler in the core Python harness."
             " Add one, or add the suite to UNRUNNABLE_SUITES with a reason."
         )
+
+
+def _timed_processing(
+    case: dict[str, Any],
+) -> Callable[[str], Callable[[], object]]:
+    """Returns how a `process_messages` timing case prepares a timed run.
+
+    The catalogs are built and the payload decoded before the timing starts.
+    Each timed run creates a processor and hands it every message in one
+    `process_messages` call.
+    """
+    catalogs = [_load_catalog_path(p) for p in case["catalogPaths"]]
+    config = {"none": None, "relaxed": RELAXED_VALIDATION}[
+        case["args"]["validation_config"]
+    ]
+    options = MessageProcessorOptions(validation_config=config)
+
+    def prepare(payload: str) -> Callable[[], object]:
+        messages = json.loads(payload)
+        return lambda: MessageProcessor(catalogs, options=options).process_messages(
+            messages
+        )
+
+    return prepare
+
+
+def test_timing_cases_have_handlers() -> None:
+    """Every timing case is one `test_conformance_timing` can run.
+
+    The timing cases run only under `-m performance`, so this check runs with
+    the other tests to catch a case the harness cannot run.
+    """
+    assert TIMING_CASES, "No timing cases found under conformance/core."
+    for test_id, _, case in TIMING_CASES:
+        assert (case.get("action"), case.get("operation")) == (
+            "measure_growth",
+            "process_messages",
+        ), f"{test_id}: the core harness has no handler for this timing case."
+        _timed_processing(case)
+
+
+@pytest.mark.performance
+@pytest.mark.parametrize(
+    "test_id, rel_path, case",
+    TIMING_CASES,
+    ids=[c[0] for c in TIMING_CASES],
+)
+def test_conformance_timing(
+    test_id: str, rel_path: str, case: dict[str, Any], timing: Any
+) -> None:
+    """Runs a `measure_growth` case of `core/message_processor_scaling.yaml`."""
+    assert case["action"] == "measure_growth", test_id
+    assert case["operation"] == "process_messages", test_id
+    timing.measure_growth(case, _timed_processing(case))
 
 
 def test_resolve_nodes_outside_its_suite_is_unsupported() -> None:
@@ -1078,9 +1168,7 @@ def validate_from_json_case(case: dict[str, Any]) -> None:
         with assert_raises(expect_err):
             Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver)
     else:
-        cat = _with_case_peers(
-            Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver), case
-        )
+        cat = Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver)
         expected = case.get("expect", {})
         unknown_keys = set(expected) - _FROM_JSON_EXPECT_KEYS
         assert (
@@ -1149,27 +1237,6 @@ def sdk_catalog(catalog_id: Any) -> CatalogApi | None:
     return None
 
 
-def _with_case_peers(catalog: CatalogApi, case: dict[str, Any]) -> CatalogApi:
-    """Links the catalogs that a case lists in `peerCatalogPaths` to `catalog`.
-
-    Returns the catalog that `with_peer_catalogs` returns, which resolves
-    cross-catalog references into the peers.
-    """
-    paths = case.get("peerCatalogPaths")
-    if not paths:
-        return catalog
-    peers: list[CatalogApi] = []
-    for path in paths:
-        full_p = os.path.abspath(os.path.join(CONFORMANCE_ROOT, "../", path))
-        with open(full_p, "r", encoding="utf-8") as f:
-            peers.append(
-                Catalog.from_json(
-                    json.load(f), protocol_version=catalog.protocol_version
-                )
-            )
-    return catalog.with_peer_catalogs(peers)
-
-
 def _load_case_catalog(case: dict[str, Any]) -> tuple[Any, str | None]:
     """Returns the catalog document of a case and the path it was read from."""
     c_path = case.get("catalogPath") or case.get("catalogFile")
@@ -1206,9 +1273,7 @@ def validate_validation_schema_case(case: dict[str, Any]) -> None:
                 c_schema, catalog_id=c_id, protocol_version=p_ver
             ).validation_schema
         return
-    cat = _with_case_peers(
-        Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver), case
-    )
+    cat = Catalog.from_json(c_schema, catalog_id=c_id, protocol_version=p_ver)
 
     expect_file = case.get("expectFile")
     assert expect_file, "validation_schema cases require expectFile or expectError"
@@ -1326,7 +1391,12 @@ def validate_common_type_case(case: dict[str, Any]) -> None:
 
     from a2ui.core.schema import v0_9 as schema_v0_9, v1_0 as schema_v1_0
 
-    schema_packages = {"v0.9": schema_v0_9, "v0.9.1": schema_v0_9, "v1.0": schema_v1_0}
+    schema_packages = {
+        "v0.9": schema_v0_9,
+        "v0.9.1": schema_v0_9,
+        "1.0": schema_v1_0,
+        "v1.0": schema_v1_0,
+    }
     p_ver = resolve_protocol_version(case)
     assert (
         p_ver in schema_packages
@@ -1571,7 +1641,7 @@ def validate_handle_rpc_case(case: dict[str, Any]) -> None:
             "protocolVersion"
         )
         or case.get("protocolVersion")
-        or "v1.0"
+        or "1.0"
     )
 
     cat = Catalog(
@@ -1650,7 +1720,7 @@ def validate_handle_rpc_case(case: dict[str, Any]) -> None:
             ),
             options=CallOptions(
                 function_call_id=outbound_call["functionCallId"],
-                version="v1.0",
+                version="1.0",
             ),
         )
         processor.process_messages(inbound_response)
@@ -1680,7 +1750,7 @@ def validate_handle_rpc_case(case: dict[str, Any]) -> None:
                 ),
                 options=CallOptions(
                     function_call_id=spec["functionCallId"],
-                    version="v1.0",
+                    version="1.0",
                     timeout_ms=spec.get("timeoutMs"),
                 ),
             )
@@ -1723,7 +1793,7 @@ def validate_select_catalog_case(case: dict[str, Any]) -> None:
     catalogs_dict: dict[str, CatalogApi] = {}
     if "catalogs" in args and isinstance(args["catalogs"], dict):
         for cat_id, cat_def in args["catalogs"].items():
-            p_ver = cat_def.get("protocolVersion", "v1.0")
+            p_ver = cat_def.get("protocolVersion", "1.0")
             catalogs_dict[cat_id] = Catalog(
                 catalog_id=cat_id,
                 protocol_version=p_ver,
@@ -1732,12 +1802,12 @@ def validate_select_catalog_case(case: dict[str, Any]) -> None:
         for cat_id in surface_args.get("supportedCatalogIds", [default_cat_id]):
             catalogs_dict[cat_id] = Catalog(
                 catalog_id=cat_id,
-                protocol_version="v1.0",
+                protocol_version="1.0",
             )
 
     default_cat = catalogs_dict.get(
         default_cat_id,
-        Catalog(catalog_id=default_cat_id, protocol_version="v1.0"),
+        Catalog(catalog_id=default_cat_id, protocol_version="1.0"),
     )
     surface = SurfaceModel(
         surface_id=s_id,

@@ -188,7 +188,9 @@ public enum ConformanceTestHelper {
 
   /// Finds the `common_types.json` schema for a given protocol version.
   public static func commonTypesSchema(forProtocolVersion version: String) throws -> JSONValue? {
-    let subpath = version.hasPrefix("v1") ? "v1_0" : (version.hasPrefix("v0.8") ? "v0_8" : "v0_9")
+    let subpath =
+      (version.hasPrefix("v1") || version.hasPrefix("1."))
+      ? "v1_0" : ((version.hasPrefix("v0.8") || version.hasPrefix("0.8")) ? "v0_8" : "v0_9")
     let fileURL = repoRoot.appendingPathComponent("specification/\(subpath)/json/common_types.json")
     guard FileManager.default.fileExists(atPath: fileURL.path) else { return nil }
     return try JSONValue.parse(try Data(contentsOf: fileURL))
@@ -242,7 +244,8 @@ public enum ConformanceTestHelper {
         allDefinitions[key] = definition
       }
     }
-    for (key, definition) in catalogSchema["$defs"]?.objectValue ?? [:] {
+    for (key, definition) in catalogSchema["$defs"]?.objectValue ?? [:]
+    where key != "anyComponent" && key != "anyFunction" {
       allDefinitions[key] = definition
     }
 
@@ -295,9 +298,9 @@ public enum ConformanceTestHelper {
     }
 
     let resolvedProtocolVersion =
-      protocolVersion
-      ?? catalogSchema["protocolVersion"]?.stringValue
+      catalogSchema["protocolVersion"]?.stringValue
       ?? catalogSchema["protocol_version"]?.stringValue
+      ?? protocolVersion
     var functions: [any FunctionImplementation] = []
     if catalogSchema["$schema"] != nil {
       if resolvedProtocolVersion == "v1.0" || resolvedProtocolVersion == "1.0" {
@@ -307,8 +310,13 @@ public enum ConformanceTestHelper {
       }
     }
     if let funcObj = catalogSchema["functions"]?.objectValue {
-      for (funcName, funcVal) in funcObj {
-        guard let paramObj = funcVal["parameters"]?.objectValue else { continue }
+      for (funcName, funcVal) in funcObj
+      where !functions.contains(where: { $0.api.name == funcName }) {
+        guard
+          let paramObj =
+            funcVal["parameters"]?.objectValue
+            ?? funcVal["properties"]?["args"]?.objectValue
+        else { continue }
         let returnTypeStr = funcVal["returnType"]?.stringValue ?? "any"
         let retType = FunctionReturnType(rawValue: returnTypeStr) ?? .any
         if let schema = try? Schema(rawSchema: .object(paramObj), context: context) {

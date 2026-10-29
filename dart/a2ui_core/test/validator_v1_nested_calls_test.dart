@@ -644,6 +644,85 @@ void main() {
     });
   });
 
+  group('PayloadValidator v1.0 validateFunctionArgs', () {
+    test('checks the arguments against the function', () {
+      expect(
+        () => validator().validateFunctionArgs('formatString', {'value': 'hi'}),
+        returnsNormally,
+      );
+      expect(
+        () => validator().validateFunctionArgs('formatString', {'text': 'hi'}),
+        rejected,
+      );
+    });
+
+    test('rejects a function the catalog does not declare', () {
+      expect(
+        () => validator().validateFunctionArgs(
+          'vibrate',
+          {},
+          componentId: 'button',
+        ),
+        throwsA(
+          isA<A2uiValidationError>().having(
+            (e) => e.message,
+            'message',
+            contains("In component 'button'"),
+          ),
+        ),
+      );
+    });
+
+    test('leaves the calls nested in its arguments unchecked', () {
+      expect(
+        () => validator().validateFunctionArgs('formatString', {
+          'value': {
+            '@call': 'notAFunction',
+            'args': {'anything': 1},
+          },
+        }),
+        returnsNormally,
+      );
+    });
+  });
+
+  group('PayloadValidator v1.0 validateFunctionCallFields', () {
+    test('accepts the fields FunctionCall allows', () {
+      expect(
+        () => validator().validateFunctionCallFields({
+          '@call': 'formatString',
+          'catalogId': 'elsewhere',
+          'args': {'value': 3},
+        }),
+        returnsNormally,
+      );
+    });
+
+    test('rejects a field FunctionCall does not allow', () {
+      expect(
+        () => validator().validateFunctionCallFields({
+          '@call': 'formatString',
+          'args': {'value': 'hi'},
+          'unknown': 1,
+        }),
+        throwsA(
+          isA<A2uiValidationError>().having(
+            (e) => e.message,
+            'message',
+            contains("no field 'unknown'"),
+          ),
+        ),
+      );
+    });
+
+    test('rejects a call with no string @call', () {
+      expect(
+        () => validator().validateFunctionCallFields({'@call': 3}),
+        throwsA(isA<A2uiValidationError>()),
+      );
+    });
+  });
+
   group('PayloadValidator v1.0 nested calls, component naming a catalogId', () {
     // A call that names no catalogId runs in the surface default, which a
     // component naming a catalogId need not belong to, so only the call's
@@ -829,12 +908,12 @@ void main() {
         processor.processMessages(
           AgentToRendererMessagePayload([
             CreateSurfaceMessage(
-              version: 'v1.0',
+              version: '1.0',
               surfaceId: 's',
               catalogId: defaultCatalog,
             ),
             UpdateComponentsMessage(
-              version: 'v1.0',
+              version: '1.0',
               surfaceId: 's',
               components: [component],
             ),
@@ -1055,7 +1134,7 @@ void main() {
           processor.processMessages(
             AgentToRendererMessagePayload([
               UpdateComponentsMessage(
-                version: 'v1.0',
+                version: '1.0',
                 surfaceId: 's',
                 components: components,
               ),

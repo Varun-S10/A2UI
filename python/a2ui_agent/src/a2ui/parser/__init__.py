@@ -38,7 +38,6 @@ from .messages import (
     to_message_models,
 )
 from .parser import Parser
-from .payload_fixer import parse_and_fix
 from .response_part import (
     A2uiPart,
     RawA2uiPart,
@@ -46,6 +45,7 @@ from .response_part import (
     ResponsePart,
     TextPart,
 )
+from .response_stream import ResponseStream
 
 __all__ = [
     "A2uiCompilationError",
@@ -68,9 +68,9 @@ __all__ = [
     "RawA2uiPart",
     "RawResponsePart",
     "ResponsePart",
+    "ResponseStream",
     "TextPart",
     "normalize_prompt_example_messages",
-    "parse_and_fix",
     "to_message_dicts",
     "to_message_models",
 ]

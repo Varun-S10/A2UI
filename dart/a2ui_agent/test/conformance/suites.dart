@@ -16,17 +16,16 @@
 /// protocol version this SDK implements.
 ///
 /// The agent suites are written against v1.0. A harness runs each case twice,
-/// once in each [SuiteVersion]. As written in v1.0, a case that reaches a part
-/// of this SDK that is declared but not implemented yet is skipped; see
-/// [SuiteVersion.run]. Lowered to v0.9, a harness lowers what a case hands the
-/// SDK to v0.9 and lifts what the SDK returns back to v1.0 before comparing:
+/// once in each [SuiteVersion]. Lowered to v0.9, a harness lowers what a case
+/// hands the SDK to v0.9 and lifts what the SDK returns back to v1.0 before
+/// comparing:
 ///
-/// - A `version` of `v1.0` becomes `v0.9`, and one of `v0.9` becomes
-///   `v1.0`. A case written with `v0.9` means a version other than its
+/// - A `version` of `1.0` becomes `v0.9`, and one of `v0.9` becomes
+///   `1.0`. A case written with `v0.9` means a version other than its
 ///   catalog's, which for this SDK is v1.0.
 /// - A catalog document's `protocolVersion` of `1.0` becomes `0.9`, and any
 ///   function `returnType` of `validationResult` becomes `boolean`.
-/// - Capabilities keyed by `v1.0` are keyed by `v0.9`.
+/// - Capabilities keyed by `1.0` are keyed by `v0.9`.
 /// - v1.0 lets `createSurface` name no catalog and v0.9 does not, so a case
 ///   that never names a catalog has the first catalog of the case named in
 ///   each `createSurface`, and removed again from what the SDK returns.
@@ -76,22 +75,6 @@ enum SuiteVersion {
 
   bool get _lowers => this == v0_9;
 
-  /// Runs [body], the body of a case.
-  ///
-  /// As written in v1.0, a case that reaches a part of this SDK that is
-  /// declared but not implemented yet, which throws [UnimplementedError], is
-  /// marked skipped, naming the part. It runs once that part is implemented.
-  void run(void Function() body) {
-    if (_lowers) return body();
-    try {
-      body();
-      // A stub is what throws it, so catching it is how a stub is found.
-      // ignore: avoid_catching_errors
-    } on UnimplementedError catch (error) {
-      markTestSkipped('Not implemented yet: ${error.message}');
-    }
-  }
-
   /// The catalog a suite names by [entry]; see [catalogConfig].
   CatalogConfig catalogConfig(Object? entry) =>
       _catalogConfig(entry, lower: _lowers);
@@ -140,7 +123,7 @@ enum SuiteVersion {
 
   /// [parts] in the vocabulary of the suites; see [liftParts].
   List<Object?> partsJson(
-    List<ResponsePart> parts, {
+    List<StreamPart> parts, {
     bool join = false,
     String? injectedCatalogId,
   }) => _lowers
@@ -157,6 +140,17 @@ enum SuiteVersion {
   }
 }
 
+/// Compiles one block and checks its messages on their own.
+///
+/// A conformance `compile` case fixes the messages an agent sends for one
+/// block, so they are checked the way [validatePayload] checks a payload: a
+/// surface that the block updates without creating is assumed to exist.
+List<AgentToRendererMessage> compileChecked(Parser parser, String content) {
+  final List<AgentToRendererMessage> messages = parser.compile(content);
+  validatePayload(parser.catalogs, messages);
+  return messages;
+}
+
 /// Suite-level error categories mapped onto this SDK's exception types.
 final Map<String, Matcher> _errors = {
   'ParseError': isA<A2uiParseError>(),
@@ -165,9 +159,6 @@ final Map<String, Matcher> _errors = {
 };
 
 /// Expects [body] to throw the error category of a case's `expect_error`.
-///
-/// An [UnimplementedError] is thrown on rather than compared, so that
-/// [SuiteVersion.run] skips a case that reaches a part not implemented yet.
 void expectThrowsCategory(
   void Function() body,
   Object? expectError, {
@@ -175,16 +166,7 @@ void expectThrowsCategory(
 }) {
   final category =
       (expectError! as Map<String, Object?>)['category']! as String;
-  try {
-    body();
-    // ignore: avoid_catching_errors
-  } on UnimplementedError {
-    rethrow;
-  } on Object catch (error) {
-    expect(error, _errors[category], reason: reason);
-    return;
-  }
-  fail('Expected a $category, but nothing was thrown. ${reason ?? ''}');
+  expect(body, throwsA(_errors[category]), reason: reason);
 }
 
 /// The catalog a suite names by [entry]: a path relative to `conformance/`,
@@ -344,14 +326,14 @@ Map<String, Object?> lowerCatalogDocument(Map<String, Object?> document) {
 /// [version] swapped between the suite's version and this SDK's, in either
 /// spelling; any other value is returned as it is.
 Object? swapVersion(Object? version) => switch (version) {
-  'v1.0' => 'v0.9',
-  'v0.9' => 'v1.0',
+  '1.0' || 'v1.0' => 'v0.9',
+  'v0.9' => '1.0',
   _ => version,
 };
 
 // A case may write the field in curly quotes, which the parser repairs.
 final RegExp _versionField = RegExp(
-  '([“"]version[”"]\\s*:\\s*[“"])(v1\\.0|v0\\.9)([”"])',
+  '([“"]version[”"]\\s*:\\s*[“"])(v?1\\.0|v0\\.9)([”"])',
 );
 
 /// [text], a payload a model wrote, lowered to v0.9: each `version` swapped,
@@ -558,11 +540,11 @@ final Map<String, String> _liftedKeys = {
 
 /// [parts] in the vocabulary of the suites, with messages lifted to v1.0.
 List<Object?> liftParts(
-  List<ResponsePart> parts, {
+  List<StreamPart> parts, {
   bool join = false,
   String? injectedCatalogId,
 }) => [
-  for (final ResponsePart part in parts)
+  for (final StreamPart part in parts)
     switch (part) {
       TextPart(:final String text) => {'text': text},
       A2uiPart(:final List<AgentToRendererMessage> a2ui) => {
@@ -572,6 +554,7 @@ List<Object?> liftParts(
           injectedCatalogId: injectedCatalogId,
         ),
       },
+      ErrorPart(:final A2uiError error) => errorPartJson(error),
     },
 ];
 
@@ -626,15 +609,26 @@ Map<String, Object?> messageAsWritten(AgentToRendererMessage message) => {
 
 /// [parts] in the vocabulary of the suites, with messages as this SDK writes
 /// them; see [messageAsWritten].
-List<Object?> partsAsWritten(List<ResponsePart> parts) => [
-  for (final ResponsePart part in parts)
+List<Object?> partsAsWritten(List<StreamPart> parts) => [
+  for (final StreamPart part in parts)
     switch (part) {
       TextPart(:final String text) => {'text': text},
       A2uiPart(:final List<AgentToRendererMessage> a2ui) => {
         'a2ui': a2ui.map(messageAsWritten).toList(),
       },
+      ErrorPart(:final A2uiError error) => errorPartJson(error),
     },
 ];
+
+/// An [ErrorPart] in the vocabulary of the suites: the category of its
+/// error.
+Map<String, Object?> errorPartJson(A2uiError error) => {
+  'error': {
+    'category': _errors.entries
+        .firstWhere((entry) => entry.value.matches(error, {}))
+        .key,
+  },
+};
 
 /// [expected] with `is_final: true` dropped, since a part is final unless it
 /// says otherwise.

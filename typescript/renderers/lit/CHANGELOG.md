@@ -1,5 +1,11 @@
 ## Unreleased
 
+- `<a2ui-surface>` tolerates a surface whose `componentsModel` has no `onCreated` or `onDeleted` event source, such as a partial test double, instead of throwing while subscribing to the root ([#3658](https://github.com/a2ui-project/a2ui/pull/3658)).
+- `<a2ui-surface>` manages a per-surface `NodeResolver` and renders the resolved root `ComponentNode` via `renderA2uiNode`. [#3705](https://github.com/a2ui-project/a2ui/pull/3705)
+
+## 0.14.0
+
+- Bump dependencies for compatibility with `@a2ui/web_core: ^0.14.0`.
 - (v1_0) `<a2ui-surface>` renders a surface whose `createSurface` names no default catalog: the root resolves against its own catalog. `SurfaceModel.defaultCatalog` (and the deprecated `catalog` getter) from `@a2ui/web_core` may now be `undefined`, so code that reads `surface.defaultCatalog` must handle that case.
 - `<a2ui-surface>` re-renders when the root component's model is replaced, as happens when an update changes the root's type or catalog. It used to stop listening once the root first appeared.
 - Relocate package directory from `renderers/lit` to `typescript/renderers/lit`.

@@ -80,7 +80,7 @@ const v0_9Catalog = new Catalog(
 );
 const v1_0Catalog = new Catalog(
   'v1.0:basic',
-  'v1.0',
+  '1.0',
   v1_0Components,
   V1_0_BASIC_FUNCTIONS,
   undefined,
@@ -104,7 +104,7 @@ const v0_9BasicCatalog = new Catalog(
 );
 const v1_0BasicCatalog = new Catalog(
   'basic',
-  'v1.0',
+  '1.0',
   v1_0Components,
   V1_0_BASIC_FUNCTIONS,
   undefined,
@@ -122,56 +122,15 @@ const AGENT_DIR = path.join(CONFORMANCE_ROOT, 'agent');
 
 /**
  * Transition skip list containing specific test case names to skip.
- *
- * The entries are known web_core divergences that the Python and Dart engines
- * already satisfy:
- *
- * - 'test_v08_topology_card_child_reachable': the v0.8 reference map does not
- *   treat a single-child property such as `Card.child` as a component
- *   reference, so strict validation reports the child as orphaned.
  */
-const SKIP_TEST_NAMES = new Set(['test_v08_topology_card_child_reachable']);
+const SKIP_TEST_NAMES = new Set();
 
 /**
  * Cases that web_core's behaviour does not satisfy, keyed by suite path and
  * then case name, with the behaviour that differs. They are reported as
  * skipped with that reason. An entry that matches no case fails the run.
  */
-const FUNCTION_CALL_EXTRA_KEY_ACCEPTED =
-  'the validator accepts a function call carrying a key its catalog function' +
-  ' definition does not declare';
-const KNOWN_DIVERGENCES = new Map([
-  [
-    'core/catalog.yaml',
-    new Map([
-      [
-        'test_v09_published_basic_catalog_rejects_function_call_extra_key',
-        FUNCTION_CALL_EXTRA_KEY_ACCEPTED,
-      ],
-      [
-        'test_v09_published_minimal_catalog_rejects_function_call_extra_key',
-        FUNCTION_CALL_EXTRA_KEY_ACCEPTED,
-      ],
-      [
-        'test_v091_published_basic_catalog_rejects_function_call_extra_key',
-        FUNCTION_CALL_EXTRA_KEY_ACCEPTED,
-      ],
-      [
-        'test_v10_published_basic_catalog_rejects_function_call_extra_key',
-        FUNCTION_CALL_EXTRA_KEY_ACCEPTED,
-      ],
-    ]),
-  ],
-  [
-    'core/message_processor_v1_0.yaml',
-    new Map([
-      [
-        'test_v10_create_surface_metadata_extension_key_must_be_identifier',
-        'the v1.0 CreateSurface schema does not yet enforce UAX #31 identifier syntax on metadata.extensions keys',
-      ],
-    ]),
-  ],
-]);
+const KNOWN_DIVERGENCES = new Map();
 
 /**
  * The `expect` keys a `from_json` case may use (`FromJsonExpect` in
@@ -247,10 +206,12 @@ const UNIMPLEMENTED_ACTIONS = new Map([
   ['core_syntax', 'the Express inference format is implemented in the agent SDK'],
   ['from_catalog', 'the Express inference format is implemented in the agent SDK'],
   ['skill_set', 'skill generation is implemented in the agent SDK'],
+  ['export_to_directory', 'skill generation is implemented in the agent SDK'],
   ['process_chunk', 'web_core has no streaming inference parser'],
   ['parse_full', 'web_core has no inference-format parser'],
   ['fix_payload', 'web_core has no payload fixer'],
   ['has_parts', 'web_core has no inference-format parser'],
+  ['has_format_content', 'web_core has no inference-format parser'],
   ['generate_prompt', 'web_core has no prompt generator'],
   ['load_catalog', 'these cases exercise A2uiSchemaManager, which is agent-side only'],
   ['compile', 'web_core has no inference-format compiler'],
@@ -260,6 +221,7 @@ const UNIMPLEMENTED_ACTIONS = new Map([
   ['wrap', 'web_core has no inference-format wrapper'],
   ['parse_response', 'web_core has no inference-format parser'],
   ['parse_chunk', 'web_core has no streaming inference parser'],
+  ['stream_answer', 'streamed answers are agent-side only'],
   ['create_format', 'inference format factories are agent-side only'],
   ['create_processor', 'request processors are agent-side only'],
   ['transform_catalog', 'catalog transformers are agent-side only'],
@@ -271,6 +233,11 @@ const UNIMPLEMENTED_ACTIONS = new Map([
     'web_core does not generate the agent_to_renderer schema from its own models',
   ],
   ['validate_common_type', 'web_core has no per-definition validators for the common types'],
+  [
+    'measure_growth',
+    'the timing cases depend on the machine, so `yarn test:timing` runs them apart from the other tests (tests/timing/)',
+  ],
+  ['measure_overhead', 'web_core has no streaming inference parser'],
 ]);
 
 function findYamlFiles(dir) {
@@ -442,6 +409,9 @@ async function runConformanceHarness() {
           case 'from_json':
             validateFromJsonTestCase(testCase);
             break;
+          case 'derive':
+            validateDeriveTestCase(testCase);
+            break;
           case 'select_catalog':
             validateSelectCatalogTestCase(testCase);
             break;
@@ -590,12 +560,12 @@ async function validateRpcTestCase(testCase) {
   }
 
   const catVersion =
-    args.catalogVersion || testCase.catalog?.protocolVersion || testCase.protocolVersion || 'v1.0';
+    args.catalogVersion || testCase.catalog?.protocolVersion || testCase.protocolVersion || '1.0';
 
   const cat = new Catalog(catId, catVersion, [], funcs, undefined, undefined);
   let sentOutboundMsg;
   const processor = new MessageProcessor([cat], undefined, {
-    version: 'v1.0',
+    version: '1.0',
     outboundListener: msg => {
       sentOutboundMsg = msg;
     },
@@ -854,7 +824,7 @@ function validateSelectCatalogTestCase(testCase) {
   const catalogsDict = new Map();
   if (args.catalogs && typeof args.catalogs === 'object') {
     for (const [catId, catDef] of Object.entries(args.catalogs)) {
-      const pVer = catDef.protocolVersion || 'v1.0';
+      const pVer = catDef.protocolVersion || '1.0';
       catalogsDict.set(
         catId,
         new Catalog(catId, pVer, flexibleComponents, [], undefined, undefined),
@@ -865,14 +835,14 @@ function validateSelectCatalogTestCase(testCase) {
     for (const catId of supported) {
       catalogsDict.set(
         catId,
-        new Catalog(catId, 'v1.0', flexibleComponents, [], undefined, undefined),
+        new Catalog(catId, '1.0', flexibleComponents, [], undefined, undefined),
       );
     }
   }
 
   const defaultCat =
     catalogsDict.get(defaultCatId) ||
-    new Catalog(defaultCatId, 'v1.0', flexibleComponents, [], undefined, undefined);
+    new Catalog(defaultCatId, '1.0', flexibleComponents, [], undefined, undefined);
 
   const executeSelect = () => {
     // 1. Check protocol version consistency across catalogs
@@ -977,7 +947,7 @@ function validateValidateTestCase(testCase) {
 
   const testCatalogs = getCatalogsForTestCase(testCase);
   const processor = new MessageProcessor(testCatalogs, undefined, {
-    version: testCase.protocolVersion || 'v1.0',
+    version: testCase.protocolVersion || '1.0',
     validationConfig: STRICT_VALIDATION,
   });
 
@@ -1197,23 +1167,6 @@ function assertMatchesBuiltinCatalog(loaded) {
   );
 }
 
-/**
- * Loads the case's `peerCatalogPaths` with `Catalog.fromJson` and returns the
- * catalog `withPeerCatalogs` links to them, in the listed order, or `catalog`
- * itself when the case lists no peers.
- */
-function linkPeerCatalogs(testCase, catalog, pVer) {
-  const peerPaths = testCase.peerCatalogPaths ?? [];
-  if (peerPaths.length === 0) return catalog;
-  const peers = peerPaths.map(peerPath =>
-    Catalog.fromJson(
-      JSON.parse(fs.readFileSync(path.resolve(CONFORMANCE_ROOT, '../', peerPath), 'utf8')),
-      pVer,
-    ),
-  );
-  return catalog.withPeerCatalogs(peers);
-}
-
 function validateFromJsonTestCase(testCase) {
   const rawSchema = testCase.catalogPath
     ? JSON.parse(
@@ -1246,7 +1199,7 @@ function validateFromJsonTestCase(testCase) {
     return;
   }
 
-  const catalog = linkPeerCatalogs(testCase, load(), pVer);
+  const catalog = load();
   assert.ok(catalog, 'Catalog should be initialized from schema');
 
   if (testCase.expect) {
@@ -1300,6 +1253,88 @@ function validateFromJsonTestCase(testCase) {
         );
       }
     }
+  }
+}
+
+/**
+ * The `expect` keys a `derive` case may use (`DeriveExpect` in
+ * conformance_schema.json).
+ */
+const DERIVE_EXPECT_KEYS = new Set([
+  'absentKeys',
+  'catalogId',
+  'components',
+  'functions',
+  'instructions',
+  'protocolVersion',
+  'theme',
+]);
+
+/**
+ * Runs a `derive` case: loads the source catalog with `fromJson`, derives a
+ * catalog from it, and checks the derived catalog and its `toJson()` document.
+ */
+function validateDeriveTestCase(testCase) {
+  const source = Catalog.fromJson(readCaseCatalogDocument(testCase));
+  const {catalogId, components, functions, instructions} = testCase.args;
+  // A map with one key is a new entry, built by loading it into a catalog of
+  // the source's version.
+  const entries = (list, kind) =>
+    list?.map(item => {
+      if (typeof item === 'string') return item;
+      const [name, definition] = Object.entries(item)[0];
+      const holder = Catalog.fromJson({
+        catalogId: 'conformance:derive-entries',
+        protocolVersion: source.protocolVersion,
+        [kind]: {[name]: definition},
+      });
+      return holder[kind].get(name);
+    });
+  const derive = () =>
+    source.derive({
+      catalogId,
+      components: entries(components, 'components'),
+      functions: entries(functions, 'functions'),
+      instructions,
+    });
+
+  if (testCase.expectError) {
+    assert.throws(derive, err => {
+      if (!matchesErrorCategory(err, testCase.expectError.category)) return false;
+      return !testCase.expectError.message || err.message.includes(testCase.expectError.message);
+    });
+    return;
+  }
+
+  const expected = testCase.expect;
+  const unknownKeys = Object.keys(expected).filter(key => !DERIVE_EXPECT_KEYS.has(key));
+  assert.deepStrictEqual(unknownKeys, [], `Unknown derive expect keys: ${unknownKeys}`);
+  const derived = derive();
+  const document = derived.toJson();
+  if (expected.catalogId) assert.strictEqual(derived.id, expected.catalogId);
+  if (expected.protocolVersion) {
+    assert.strictEqual(
+      toCanonicalVersion(derived.protocolVersion),
+      toCanonicalVersion(expected.protocolVersion),
+    );
+  }
+  for (const kind of ['components', 'functions']) {
+    const listed = expected[kind];
+    if (!listed) continue;
+    const names = Array.isArray(listed) ? listed : Object.keys(listed);
+    assert.deepStrictEqual([...derived[kind].keys()].sort(), [...names].sort(), `${kind} mismatch`);
+    if (!Array.isArray(listed)) {
+      for (const [name, definition] of Object.entries(listed)) {
+        assertJsonSetEqual(document[kind][name], definition, `${kind} '${name}' differs`);
+      }
+    }
+  }
+  if (expected.theme) assertJsonSetEqual(document.theme, expected.theme, 'theme differs');
+  if (expected.instructions !== undefined) {
+    assert.strictEqual(document.instructions, expected.instructions);
+  }
+  for (const key of expected.absentKeys ?? []) {
+    assert.ok(!(key in document), `Expected toJson() to carry no '${key}'`);
   }
 }
 
@@ -1497,11 +1532,10 @@ function sortKeysDeep(node) {
 /**
  * Returns the catalog a `validation_schema` case checks: the authored catalog
  * loaded with `fromJson`, even when it is one web_core implements. Built-in
- * equivalence is covered by `matchesBuiltinCatalog`. When the case lists
- * `peerCatalogPaths`, the catalog linked to them.
+ * equivalence is covered by `matchesBuiltinCatalog`.
  */
 function loadValidationSchemaCatalog(testCase, rawSchema, pVer) {
-  return linkPeerCatalogs(testCase, Catalog.fromJson(rawSchema, pVer, testCase.catalogId), pVer);
+  return Catalog.fromJson(rawSchema, pVer, testCase.catalogId);
 }
 
 /** Runs a `validation_schema` case against its golden `expectFile`. */
@@ -1724,7 +1758,7 @@ function resolveProtocolVersion(testCase) {
   const catId = String(testCase.catalogId || catSpec.catalogId || caseSchema.catalogId || '');
   if (catId.includes('v08') || catId.includes('v0_8')) return 'v0.8';
   if (catId.includes('v09') || catId.includes('v0_9')) return 'v0.9';
-  if (catId.includes('v10') || catId.includes('v1_0') || catId.includes('v1.0')) return 'v1.0';
+  if (catId.includes('v10') || catId.includes('v1_0') || catId.includes('v1.0')) return '1.0';
   return 'v0.9';
 }
 
@@ -2295,12 +2329,14 @@ function validateProcessMessagesTestCase(testCase) {
       if (!stepMsgs && step.message) stepMsgs = [step.message];
       stepMsgs = normalizeMsgs(stepMsgs);
 
+      // A step's validationConfig applies to that call only.
+      const context = step.validationConfig ? {validationConfig: step.validationConfig} : undefined;
       const stepExpectError =
         step.expectError || (i === steps.length - 1 ? expectError : undefined);
       if (stepExpectError) {
         let thrown;
         try {
-          processor.processMessages(stepMsgs);
+          processor.processMessages(stepMsgs, context);
         } catch (err) {
           thrown = err;
         }
@@ -2311,7 +2347,7 @@ function validateProcessMessagesTestCase(testCase) {
         }
         assertExpectedProcessError(thrown, stepExpectError);
       } else {
-        processor.processMessages(stepMsgs);
+        processor.processMessages(stepMsgs, context);
         const stepExpect = step.expect || (i === steps.length - 1 ? expect : undefined);
         if (stepExpect) {
           assertSurfacesMatch(processor, stepExpect);

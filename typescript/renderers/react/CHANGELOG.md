@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Add `MarkdownComponentContext` and `MarkdownComponentProps`. `A2uiSurface` renders the Markdown of the basic catalog's `Text` through the React component the context holds, inside the app's React tree, so the component reads the app's context. It takes precedence over `MarkdownContext`. [#3597](https://github.com/a2ui-project/a2ui/issues/3597)
+
+## 0.14.0
+
+- Bump dependencies for compatibility with `@a2ui/web_core: ^0.14.0`.
 - (v1_0) `A2uiSurface` renders a surface whose `createSurface` names no default catalog: each component resolves against its own catalog. `SurfaceModel.defaultCatalog` (and the deprecated `catalog` getter) from `@a2ui/web_core` may now be `undefined`, so code that reads `surface.defaultCatalog` must handle that case.
 - Relocate package directory from `renderers/react` to `typescript/renderers/react`.
 

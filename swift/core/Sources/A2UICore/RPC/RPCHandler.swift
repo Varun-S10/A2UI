@@ -143,7 +143,7 @@ public final class RPCHandler {
     }
 
     let rawArgs = message.callFunction.args ?? [:]
-    let fallbackHandler = DummyContextFunctionHandler(catalogs: catalogs, defaultCatalog: catalog)
+    let fallbackHandler = DummyContextFunctionHandler(catalogs: catalogs)
     let argHandler = RPCArgumentFunctionHandler(
       delegate: dataContext?.functionHandler,
       fallback: fallbackHandler
@@ -160,7 +160,7 @@ public final class RPCHandler {
       ?? DataContext(
         dataModel: argResolutionContext.dataModel,
         path: "",
-        functionHandler: fallbackHandler,
+        functionHandler: argHandler,
         protocolVersion: message.version
       )
 
@@ -225,7 +225,6 @@ public final class RPCHandler {
   ///   - functionName: The name of the function to execute on the agent.
   ///   - catalogID: Optional catalog identifier.
   ///   - args: Named argument dictionary.
-  ///   - returnType: Expected return type name.
   ///   - version: The A2UI protocol version for the outbound message.
   ///   - timeoutSeconds: Maximum duration to wait before timing out (default 30s).
   ///   - sendOutbound: Callback sending the outbound message.
@@ -236,7 +235,6 @@ public final class RPCHandler {
     catalogID: String? = nil,
     functionCallID: String? = nil,
     args: [String: JSONValue]? = nil,
-    returnType: String? = nil,
     version: A2UIProtocolVersion,
     timeoutSeconds: TimeInterval = 30.0,
     sendOutbound: @escaping @Sendable (RendererToAgentMessage) -> Void
@@ -245,8 +243,7 @@ public final class RPCHandler {
     let payload = CallFunctionPayload(
       call: functionName,
       catalogID: catalogID,
-      args: args,
-      returnType: returnType
+      args: args
     )
     let message = CallAgentFunctionMessage(
       surfaceID: surfaceID,
@@ -335,7 +332,7 @@ public final class RPCHandler {
 }
 
 private final class RPCArgumentFunctionHandler: FunctionHandler {
-  private weak var delegate: FunctionHandler?
+  private let delegate: FunctionHandler?
   private let fallback: DummyContextFunctionHandler
   private(set) var capturedError: Error?
 
@@ -357,24 +354,44 @@ private final class RPCArgumentFunctionHandler: FunctionHandler {
     }
     delegate?.handleFunctionError(error, functionName: functionName)
   }
+
+  func validateFunctionCatalog(id catalogID: String?, functionName: String) throws {
+    if let delegate {
+      try delegate.validateFunctionCatalog(id: catalogID, functionName: functionName)
+    } else {
+      try fallback.validateFunctionCatalog(id: catalogID, functionName: functionName)
+    }
+  }
 }
 
 private final class DummyContextFunctionHandler: FunctionHandler {
   private let catalogs: [String: AnyCatalog]
-  private let defaultCatalog: AnyCatalog
 
-  init(catalogs: [String: AnyCatalog], defaultCatalog: AnyCatalog) {
+  init(catalogs: [String: AnyCatalog]) {
     self.catalogs = catalogs
-    self.defaultCatalog = defaultCatalog
   }
 
   func function(named name: String, catalogID: String?) -> (any FunctionImplementation)? {
     if name == "@index" {
       return IndexFunction()
     }
-    if let catalogID {
-      return catalogs[catalogID]?.functions[name]
+    guard let catalogID else { return nil }
+    return catalogs[catalogID]?.functions[name]
+  }
+
+  func validateFunctionCatalog(id catalogID: String?, functionName: String) throws {
+    let path = CatalogResolutionErrors.callCatalogIDPath(functionName: functionName)
+    let code = CatalogResolutionErrors.runtimeCatalogErrorCode
+    guard let catalogID else {
+      throw CatalogResolutionErrors.noDefaultCatalog(
+        subject: "Function call '\(functionName)'",
+        surfaceID: "",
+        path: path,
+        code: code
+      )
     }
-    return defaultCatalog.functions[name]
+    guard catalogs[catalogID] != nil else {
+      throw CatalogResolutionErrors.catalogNotFound(catalogID, path: path, code: code)
+    }
   }
 }

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import A2UIJSON
+import Combine
 import Foundation
 import OrderedJSON
 
@@ -33,25 +34,91 @@ public final class NodeResolver: Sendable {
   public let dataModel: DataModel
   public weak var actionHandler: (any ActionHandling)?
   public let protocolVersion: A2UIProtocolVersion?
+
+  private struct CachedComponentSchema {
+    let propertiesSchema: [String: JSONValue]
+    let classifiedTypes: [String: PropertyType]
+  }
+
+  private struct ComponentIdentity: Equatable {
+    let type: String
+    let catalogID: String?
+  }
+
+  private struct NodeResolutionRecord {
+    let nodeKey: String
+    let definitionID: String
+    let instanceID: String
+    let basePath: String?
+    let index: Int?
+    let instanceSuffix: String?
+    let visited: Set<String>
+    var componentSnapshot: ComponentModel
+    var childIdentities: [String: ComponentIdentity?]
+    var readValues: [String: JSONValue?]
+    var templateCounts: [String: Int]
+    var directChildInstances: Set<String>
+  }
+
+  /// The number of `resolveNode` invocations executed during the most recent `resolveTree()` pass.
+  package private(set) var lastResolvedNodeCount = 0
+
+  private var activeNodes: [String: Node] = [:]
+  private var schemaCache: [String: CachedComponentSchema] = [:]
+  private var nodeRecords: [String: NodeResolutionRecord] = [:]
+  private var nodesByDefinitionID: [String: Set<String>] = [:]
+  private var parentsByChildDefinitionID: [String: Set<String>] = [:]
+  private var parentsByChildInstanceID: [String: Set<String>] = [:]
+  private var nodesByReadPath: [String: Set<String>] = [:]
+  private var readPathsByAncestorPath: [String: Set<String>] = [:]
+  private var nodesByTemplatePath: [String: Set<String>] = [:]
+  private var dirtyComponentIDs: Set<String> = []
+  private var dirtyDataPaths: Set<String> = []
+  private var needsFullResolve = false
+  private var resolvedInCurrentPass: Set<String> = []
+  private var currentNodeReadValues: [String: JSONValue?]?
+  private var currentNodeTemplateCounts: [String: Int]?
+  private var currentNodeChildIdentities: [String: ComponentIdentity?]?
+  private var currentNodeDirectChildren: Set<String>?
   private var reportedExpressionErrors: Set<String> = []
   private var currentPassExpressionErrors: Set<String> = []
   private var isResolvingTree = false
   private var currentComponentID: String?
   private var currentPropertyPath: String?
+  private var modelCancellables = Set<AnyCancellable>()
 
-  public var isV10: Bool {
+  /// Whether this resolver follows v1.0 rules.
+  ///
+  /// Uses `protocolVersion` when set. Otherwise it is taken from the default catalog, or, with
+  /// no default, it holds when every catalog is at least v1.0.
+  public var atLeastV10: Bool {
     if let protocolVersion {
       return protocolVersion.isAtLeastV10
     }
-    return catalog.isAtLeastV10
+    if let defaultCatalog {
+      return defaultCatalog.isAtLeastV10
+    }
+    return !catalogs.isEmpty && catalogs.values.allSatisfy(\.isAtLeastV10)
   }
 
-  /// The primary default catalog associated with this resolver.
+  /// The default catalog of this resolver, or an empty catalog when it has none.
+  ///
+  /// A resolver without a default catalog (allowed from v1.0) never falls back to one of its
+  /// other catalogs, because components and function calls must name the catalog they run in.
+  /// To resolve that catalog, use ``getCatalog(id:)``.
   public var catalog: AnyCatalog {
-    if let defaultCatalogID, let catalog = catalogs[defaultCatalogID] {
-      return catalog
-    }
-    return catalogs.values.first ?? Catalog(id: "empty", components: [])
+    defaultCatalog ?? Catalog(id: "empty", components: [])
+  }
+
+  /// The default catalog, if this resolver has one and it is available.
+  private var defaultCatalog: AnyCatalog? {
+    defaultCatalogID.flatMap { catalogs[$0] }
+  }
+
+  /// The protocol version used for evaluation and error envelopes: `protocolVersion` when set,
+  /// else the default catalog's version, else v1.0 when every catalog is at least v1.0.
+  private var effectiveProtocolVersion: A2UIProtocolVersion? {
+    protocolVersion ?? defaultCatalog?.a2uiProtocolVersion ?? (atLeastV10 ? .v10 : nil)
   }
 
   // MARK: - Initialization
@@ -67,12 +134,34 @@ public final class NodeResolver: Sendable {
   ) {
     self.surfaceID = surfaceID
     self.catalogs = catalogs
-    self.defaultCatalogID =
-      defaultCatalogID ?? (catalogs.count == 1 ? catalogs.keys.first : nil)
-    self.componentsModel = componentsModel ?? SurfaceComponentsModel()
-    self.dataModel = dataModel ?? DataModel()
+    let allCatalogsAtLeastV10 =
+      !catalogs.isEmpty && catalogs.values.allSatisfy(\.isAtLeastV10)
+    let isAtLeastV10 = protocolVersion?.isAtLeastV10 ?? allCatalogsAtLeastV10
+    if let defaultCatalogID {
+      self.defaultCatalogID = defaultCatalogID
+    } else if !isAtLeastV10, catalogs.count == 1 {
+      self.defaultCatalogID = catalogs.keys.first
+    } else {
+      self.defaultCatalogID = nil
+    }
+    let resolvedComponentsModel = componentsModel ?? SurfaceComponentsModel()
+    let resolvedDataModel = dataModel ?? DataModel()
+    self.componentsModel = resolvedComponentsModel
+    self.dataModel = resolvedDataModel
     self.actionHandler = actionHandler
     self.protocolVersion = protocolVersion
+
+    resolvedComponentsModel.changedIDsSubject
+      .sink { [weak self] ids in
+        self?.dirtyComponentIDs.formUnion(ids)
+      }
+      .store(in: &modelCancellables)
+
+    resolvedDataModel.pathChangeSubject
+      .sink { [weak self] path in
+        self?.dirtyDataPaths.insert(path)
+      }
+      .store(in: &modelCancellables)
   }
 
   public convenience init(
@@ -105,7 +194,7 @@ public final class NodeResolver: Sendable {
     self.init(
       surfaceID: surfaceID,
       catalogs: dict,
-      defaultCatalogID: defaultCatalogID ?? (catalogs.count == 1 ? catalogs.first?.id : nil),
+      defaultCatalogID: defaultCatalogID,
       componentsModel: componentsModel,
       dataModel: dataModel,
       actionHandler: actionHandler,
@@ -121,7 +210,7 @@ public final class NodeResolver: Sendable {
     if let targetCatalogID {
       return catalogs[targetCatalogID]
     }
-    if id == nil && catalogs.count == 1 {
+    if id == nil, !atLeastV10, catalogs.count == 1 {
       return catalogs.values.first
     }
     return nil
@@ -129,39 +218,374 @@ public final class NodeResolver: Sendable {
 
   // MARK: - Tree Resolution
 
-  /// Clears previously reported expression errors so subsequent evaluations re-emit.
-  public func clearReportedExpressionErrors(forComponentID componentID: String? = nil) {
-    if let componentID {
-      let prefix = "\(componentID):"
-      reportedExpressionErrors = reportedExpressionErrors.filter { !$0.hasPrefix(prefix) }
-    } else {
-      reportedExpressionErrors.removeAll()
-    }
-  }
-
   /// Resolves the component tree starting from the root component ("root")
   /// using the stored component and data models.
   public func resolveTree() -> Node? {
-    let wasResolvingTree = isResolvingTree
-    if !wasResolvingTree {
-      isResolvingTree = true
-      currentPassExpressionErrors.removeAll()
+    if isResolvingTree {
+      return resolveNode(
+        definitionID: "root",
+        instanceID: "root",
+        basePath: nil,
+        visited: [],
+        components: componentsModel.components,
+        data: dataModel.data,
+        recurseIntoChildren: true
+      )
     }
+
+    lastResolvedNodeCount = 0
+    let components = componentsModel.components
+    guard components["root"] != nil else {
+      resetResolutionState()
+      return nil
+    }
+
+    if activeNodes["root"] != nil && !needsFullResolve {
+      return resolveIncrementalChanges(components: components, currentData: dataModel.data)
+    }
+
+    resetResolutionState()
+    isResolvingTree = true
     defer {
-      if !wasResolvingTree {
-        reportedExpressionErrors = currentPassExpressionErrors
-        currentPassExpressionErrors.removeAll()
-        isResolvingTree = false
-      }
+      resolvedInCurrentPass.removeAll()
+      isResolvingTree = false
     }
     return resolveNode(
       definitionID: "root",
       instanceID: "root",
       basePath: nil,
       visited: [],
-      components: componentsModel.components,
-      data: dataModel.data
+      components: components,
+      data: dataModel.data,
+      recurseIntoChildren: true
     )
+  }
+
+  private func resetResolutionState() {
+    activeNodes.removeAll()
+    nodeRecords.removeAll()
+    nodesByDefinitionID.removeAll()
+    parentsByChildDefinitionID.removeAll()
+    parentsByChildInstanceID.removeAll()
+    nodesByReadPath.removeAll()
+    readPathsByAncestorPath.removeAll()
+    nodesByTemplatePath.removeAll()
+    dirtyComponentIDs.removeAll()
+    dirtyDataPaths.removeAll()
+    needsFullResolve = false
+    resolvedInCurrentPass.removeAll()
+    reportedExpressionErrors.removeAll()
+    currentPassExpressionErrors.removeAll()
+  }
+
+  private func resolveIncrementalChanges(
+    components: [String: ComponentModel],
+    currentData: JSONValue
+  ) -> Node? {
+    let changedCompIDs = dirtyComponentIDs
+    let changedDataPaths = dirtyDataPaths
+    dirtyComponentIDs.removeAll()
+    dirtyDataPaths.removeAll()
+
+    guard !changedCompIDs.isEmpty || !changedDataPaths.isEmpty else {
+      return activeNodes["root"]
+    }
+
+    var affectedNodeIDs: Set<String> = []
+
+    for compID in changedCompIDs {
+      let currentComp = components[compID]
+      let currentIdentity = componentIdentity(for: compID, in: components)
+
+      let directPrefix = "\(compID):"
+      let instancePrefixes = (nodesByDefinitionID[compID] ?? []).map { "\($0):" }
+      let previousErrorCount = reportedExpressionErrors.count
+      reportedExpressionErrors = reportedExpressionErrors.filter { key in
+        guard !key.hasPrefix(directPrefix) else { return false }
+        return !instancePrefixes.contains { key.hasPrefix($0) }
+      }
+      let hadClearedErrors = reportedExpressionErrors.count != previousErrorCount
+
+      if let instances = nodesByDefinitionID[compID] {
+        for nodeKey in instances {
+          guard let record = nodeRecords[nodeKey] else { continue }
+          if record.componentSnapshot != currentComp || hadClearedErrors {
+            let previousIdentity = ComponentIdentity(
+              type: record.componentSnapshot.type,
+              catalogID: record.componentSnapshot.catalogID ?? defaultCatalogID
+            )
+            if currentIdentity == previousIdentity || nodeKey == "root" {
+              affectedNodeIDs.insert(nodeKey)
+            }
+          }
+        }
+      }
+
+      if let parentInstances = parentsByChildDefinitionID[compID] {
+        for parentNodeKey in parentInstances {
+          guard let parentRecord = nodeRecords[parentNodeKey] else { continue }
+          if let recordedIdentity = parentRecord.childIdentities[compID],
+            recordedIdentity != currentIdentity
+          {
+            affectedNodeIDs.insert(parentNodeKey)
+          }
+        }
+      }
+    }
+
+    var candidateReadPaths: Set<String> = []
+    for rawChanged in changedDataPaths {
+      let normChanged = normalizePath(rawChanged)
+
+      if nodesByReadPath[normChanged] != nil {
+        candidateReadPaths.insert(normChanged)
+      }
+      for ancestor in ancestorPaths(of: normChanged) where nodesByReadPath[ancestor] != nil {
+        candidateReadPaths.insert(ancestor)
+      }
+      if let subReadPaths = readPathsByAncestorPath[normChanged] {
+        candidateReadPaths.formUnion(subReadPaths)
+      }
+
+      for (templatePath, templateNodes) in nodesByTemplatePath
+      where pathsOverlap(templatePath, normChanged) {
+        let currentCount = currentData[templatePath]?.arrayValue?.count ?? 0
+        for nodeKey in templateNodes {
+          if nodeRecords[nodeKey]?.templateCounts[templatePath] != currentCount {
+            affectedNodeIDs.insert(nodeKey)
+          }
+        }
+      }
+    }
+
+    for readPath in candidateReadPaths {
+      let currentVal = currentData[readPath]
+      if let readers = nodesByReadPath[readPath] {
+        for nodeKey in readers {
+          if let record = nodeRecords[nodeKey],
+            let recordedVal = record.readValues[readPath],
+            recordedVal != currentVal
+          {
+            affectedNodeIDs.insert(nodeKey)
+          }
+        }
+      }
+    }
+
+    guard !affectedNodeIDs.isEmpty else {
+      return activeNodes["root"]
+    }
+
+    let sortedAffected = affectedNodeIDs.sorted {
+      (nodeRecords[$0]?.visited.count ?? 0) < (nodeRecords[$1]?.visited.count ?? 0)
+    }
+
+    isResolvingTree = true
+    resolvedInCurrentPass.removeAll()
+    defer {
+      resolvedInCurrentPass.removeAll()
+      isResolvingTree = false
+    }
+
+    for nodeKey in sortedAffected {
+      guard !resolvedInCurrentPass.contains(nodeKey),
+        let record = nodeRecords[nodeKey],
+        activeNodes[nodeKey] != nil
+      else {
+        continue
+      }
+      _ = resolveNode(
+        definitionID: record.definitionID,
+        instanceID: record.instanceID,
+        basePath: record.basePath,
+        index: record.index,
+        instanceSuffix: record.instanceSuffix,
+        visited: record.visited,
+        components: components,
+        data: currentData,
+        recurseIntoChildren: false
+      )
+    }
+
+    return activeNodes["root"]
+  }
+
+  private func componentIdentity(
+    for definitionID: String,
+    in components: [String: ComponentModel]
+  ) -> ComponentIdentity? {
+    guard let comp = components[definitionID] else { return nil }
+    return ComponentIdentity(
+      type: comp.type,
+      catalogID: comp.catalogID ?? defaultCatalogID
+    )
+  }
+
+  private func makeNodeKey(instanceID: String, basePath: String?) -> String {
+    guard let basePath, !basePath.isEmpty else { return instanceID }
+    return "\(instanceID)@\(normalizePath(basePath))"
+  }
+
+  private func pathsOverlap(_ pathA: String, _ pathB: String) -> Bool {
+    if pathA == pathB || pathA == "/" || pathB == "/" { return true }
+    let prefixA = pathA + "/"
+    let prefixB = pathB + "/"
+    return pathA.hasPrefix(prefixB) || pathB.hasPrefix(prefixA)
+  }
+
+  private func normalizePath(_ path: String) -> String {
+    let segments = JSONValue.parsePath(path).map { segment in
+      segment
+        .replacingOccurrences(of: "~", with: "~0")
+        .replacingOccurrences(of: "/", with: "~1")
+    }
+    return segments.isEmpty ? "/" : "/" + segments.joined(separator: "/")
+  }
+
+  private func ancestorPaths(of normalizedPath: String) -> [String] {
+    guard normalizedPath != "/" else { return [] }
+    var result: [String] = ["/"]
+    var current = ""
+    let parts = normalizedPath.dropFirst().split(separator: "/", omittingEmptySubsequences: false)
+    for part in parts.dropLast() {
+      current += "/" + part
+      result.append(current)
+    }
+    return result
+  }
+
+  private func recordReadPath(_ path: String, in data: JSONValue) {
+    let normalized = normalizePath(path)
+    currentNodeReadValues?.updateValue(data[normalized], forKey: normalized)
+  }
+
+  private func readData(_ absPath: String, from data: JSONValue) -> JSONValue? {
+    let normalized = normalizePath(absPath)
+    let value = data[normalized]
+    currentNodeReadValues?.updateValue(value, forKey: normalized)
+    return value
+  }
+
+  private func registerNodeDependencies(_ record: NodeResolutionRecord) {
+    let nodeKey = record.nodeKey
+    var removedChildren: Set<String> = []
+
+    if let oldRecord = nodeRecords[nodeKey] {
+      if oldRecord.definitionID != record.definitionID {
+        nodesByDefinitionID[oldRecord.definitionID]?.remove(nodeKey)
+      }
+      for oldChildDefID in oldRecord.childIdentities.keys
+      where !record.childIdentities.keys.contains(oldChildDefID) {
+        parentsByChildDefinitionID[oldChildDefID]?.remove(nodeKey)
+      }
+      for oldReadPath in oldRecord.readValues.keys
+      where !record.readValues.keys.contains(oldReadPath) {
+        nodesByReadPath[oldReadPath]?.remove(nodeKey)
+        if nodesByReadPath[oldReadPath]?.isEmpty == true {
+          nodesByReadPath.removeValue(forKey: oldReadPath)
+          for ancestor in ancestorPaths(of: oldReadPath) {
+            readPathsByAncestorPath[ancestor]?.remove(oldReadPath)
+          }
+        }
+      }
+      for oldTemplatePath in oldRecord.templateCounts.keys
+      where !record.templateCounts.keys.contains(oldTemplatePath) {
+        nodesByTemplatePath[oldTemplatePath]?.remove(nodeKey)
+      }
+
+      removedChildren = oldRecord.directChildInstances.subtracting(record.directChildInstances)
+      let addedChildren = record.directChildInstances.subtracting(oldRecord.directChildInstances)
+      for addedChild in addedChildren {
+        parentsByChildInstanceID[addedChild, default: []].insert(nodeKey)
+      }
+    } else {
+      for child in record.directChildInstances {
+        parentsByChildInstanceID[child, default: []].insert(nodeKey)
+      }
+    }
+
+    nodeRecords[nodeKey] = record
+    nodesByDefinitionID[record.definitionID, default: []].insert(nodeKey)
+    for childDefID in record.childIdentities.keys {
+      parentsByChildDefinitionID[childDefID, default: []].insert(nodeKey)
+    }
+    for readPath in record.readValues.keys {
+      nodesByReadPath[readPath, default: []].insert(nodeKey)
+      for ancestor in ancestorPaths(of: readPath) {
+        readPathsByAncestorPath[ancestor, default: []].insert(readPath)
+      }
+    }
+    for templatePath in record.templateCounts.keys {
+      nodesByTemplatePath[templatePath, default: []].insert(nodeKey)
+    }
+
+    for removedChild in removedChildren {
+      parentsByChildInstanceID[removedChild]?.remove(nodeKey)
+      if parentsByChildInstanceID[removedChild]?.isEmpty ?? true {
+        parentsByChildInstanceID.removeValue(forKey: removedChild)
+        if !record.visited.contains(removedChild) {
+          pruneSubtree(removedChild, protectedNodeKeys: record.visited)
+        }
+      }
+    }
+  }
+
+  private func pruneSubtree(_ nodeKey: String, protectedNodeKeys: Set<String> = []) {
+    guard !protectedNodeKeys.contains(nodeKey) else { return }
+    activeNodes.removeValue(forKey: nodeKey)
+    let prefix = "\(nodeKey):"
+    reportedExpressionErrors = reportedExpressionErrors.filter { !$0.hasPrefix(prefix) }
+    guard let record = nodeRecords.removeValue(forKey: nodeKey) else { return }
+
+    nodesByDefinitionID[record.definitionID]?.remove(nodeKey)
+    for childDefID in record.childIdentities.keys {
+      parentsByChildDefinitionID[childDefID]?.remove(nodeKey)
+    }
+    for readPath in record.readValues.keys {
+      nodesByReadPath[readPath]?.remove(nodeKey)
+      if nodesByReadPath[readPath]?.isEmpty == true {
+        nodesByReadPath.removeValue(forKey: readPath)
+        for ancestor in ancestorPaths(of: readPath) {
+          readPathsByAncestorPath[ancestor]?.remove(readPath)
+        }
+      }
+    }
+    for templatePath in record.templateCounts.keys {
+      nodesByTemplatePath[templatePath]?.remove(nodeKey)
+    }
+
+    for childNodeKey in record.directChildInstances {
+      parentsByChildInstanceID[childNodeKey]?.remove(nodeKey)
+      if parentsByChildInstanceID[childNodeKey]?.isEmpty ?? true {
+        parentsByChildInstanceID.removeValue(forKey: childNodeKey)
+        pruneSubtree(childNodeKey, protectedNodeKeys: protectedNodeKeys)
+      }
+    }
+  }
+
+  private func cachedSchema(
+    for type: String,
+    catalogID: String?,
+    catalog: AnyCatalog?
+  ) -> CachedComponentSchema {
+    let cacheKey = "\(catalogID ?? ""):\(type)"
+    if let cached = schemaCache[cacheKey] {
+      return cached
+    }
+    let schemaJSON = catalog?.components[type]?.schema.jsonValue ?? .object([:])
+    var propertiesSchema = extractPropertiesSchema(from: schemaJSON)
+    // `accessibility` comes from `ComponentCommon`, so a component schema need not declare it.
+    if propertiesSchema["accessibility"] == nil {
+      propertiesSchema["accessibility"] = .object([
+        "$ref": .string(A2UICommonSchema.v10URI(for: "AccessibilityAttributes"))
+      ])
+    }
+    let entry = CachedComponentSchema(
+      propertiesSchema: propertiesSchema,
+      classifiedTypes: propertiesSchema.mapValues { classifySchema($0) }
+    )
+    schemaCache[cacheKey] = entry
+    return entry
   }
 
   /// Resolves a component definition into a concrete ``Node``.
@@ -170,7 +594,7 @@ public final class NodeResolver: Sendable {
   ///   - definitionID: The ID of the component in `components`.
   ///   - instanceID: The unique identifier for this instance in the tree.
   ///   - basePath: The data model base path for relative bindings.
-  ///   - visited: The set of instance IDs currently being resolved in the stack.
+  ///   - visited: The set of node keys currently being resolved in the stack.
   ///   - components: The current map of component models on the surface.
   ///   - data: The current data model JSON snapshot.
   /// - Returns: A resolved node, or `nil` if missing, cyclic, or unregistered.
@@ -182,9 +606,11 @@ public final class NodeResolver: Sendable {
     instanceSuffix: String? = nil,
     visited: Set<String> = [],
     components: [String: ComponentModel],
-    data: JSONValue
+    data: JSONValue,
+    recurseIntoChildren: Bool = true
   ) -> Node? {
-    if visited.contains(instanceID) {
+    let nodeKey = makeNodeKey(instanceID: instanceID, basePath: basePath)
+    if visited.contains(nodeKey) {
       return nil
     }
 
@@ -192,12 +618,36 @@ public final class NodeResolver: Sendable {
       return nil
     }
 
+    lastResolvedNodeCount += 1
+    resolvedInCurrentPass.insert(nodeKey)
+
+    let ancestorVisited = visited
     let previousComponentID = currentComponentID
     let previousPropertyPath = currentPropertyPath
-    currentComponentID = instanceID
+    let previousReadValues = currentNodeReadValues
+    let previousTemplateCounts = currentNodeTemplateCounts
+    let previousChildIdentities = currentNodeChildIdentities
+    let previousDirectChildren = currentNodeDirectChildren
+    let previousPassErrors = currentPassExpressionErrors
+    currentComponentID = nodeKey
+    currentNodeReadValues = [:]
+    currentNodeTemplateCounts = [:]
+    currentNodeChildIdentities = [:]
+    currentNodeDirectChildren = []
+    currentPassExpressionErrors = []
     defer {
+      if isResolvingTree {
+        let prefix = "\(nodeKey):"
+        reportedExpressionErrors = reportedExpressionErrors.filter { !$0.hasPrefix(prefix) }
+        reportedExpressionErrors.formUnion(currentPassExpressionErrors)
+      }
       currentComponentID = previousComponentID
       currentPropertyPath = previousPropertyPath
+      currentNodeReadValues = previousReadValues
+      currentNodeTemplateCounts = previousTemplateCounts
+      currentNodeChildIdentities = previousChildIdentities
+      currentNodeDirectChildren = previousDirectChildren
+      currentPassExpressionErrors = previousPassErrors
     }
 
     let type = component.type
@@ -205,22 +655,18 @@ public final class NodeResolver: Sendable {
     let targetCatalog = getCatalog(id: effectiveCatalogID)
 
     var visited = visited
-    visited.insert(instanceID)
+    visited.insert(nodeKey)
 
-    let schemaJSON = targetCatalog?.components[type]?.schema.jsonValue ?? .object([:])
-    let propertiesSchema = extractPropertiesSchema(from: schemaJSON)
+    let cached = cachedSchema(for: type, catalogID: effectiveCatalogID, catalog: targetCatalog)
+    let propertiesSchema = cached.propertiesSchema
 
     var componentChecks: [ResolvedCheck] = []
     var preResolvedChecksByKey: [String: [ResolvedCheck]] = [:]
-    for (key, val) in component.properties {
-      let propSchema = propertiesSchema[key] ?? .boolean(true)
-      let propType = classifySchema(propSchema)
-      if propType == .checks {
-        currentPropertyPath = key
-        let resolved = resolveChecks(val, basePath: basePath, index: index, data: data)
-        preResolvedChecksByKey[key] = resolved
-        componentChecks.append(contentsOf: resolved)
-      }
+    for (key, val) in component.properties where cached.classifiedTypes[key] == .checks {
+      currentPropertyPath = key
+      let resolved = resolveChecks(val, basePath: basePath, index: index, data: data)
+      preResolvedChecksByKey[key] = resolved
+      componentChecks.append(contentsOf: resolved)
     }
 
     var resolvedProperties: [String: any Resolved] = [:]
@@ -230,7 +676,7 @@ public final class NodeResolver: Sendable {
         continue
       }
       let propSchema = propertiesSchema[key] ?? .boolean(true)
-      let propType = classifySchema(propSchema)
+      let propType = cached.classifiedTypes[key] ?? .standard
 
       if let resolvedVal = resolveProperty(
         value: val,
@@ -244,18 +690,103 @@ public final class NodeResolver: Sendable {
         visited: visited,
         components: components,
         data: data,
-        checks: componentChecks
+        checks: componentChecks,
+        recurseIntoChildren: recurseIntoChildren
       ) {
         resolvedProperties[key] = resolvedVal
       }
     }
 
-    return Node(
+    let record = NodeResolutionRecord(
+      nodeKey: nodeKey,
+      definitionID: definitionID,
+      instanceID: instanceID,
+      basePath: basePath,
+      index: index,
+      instanceSuffix: instanceSuffix,
+      visited: ancestorVisited,
+      componentSnapshot: component,
+      childIdentities: currentNodeChildIdentities ?? [:],
+      readValues: currentNodeReadValues ?? [:],
+      templateCounts: currentNodeTemplateCounts ?? [:],
+      directChildInstances: currentNodeDirectChildren ?? []
+    )
+    registerNodeDependencies(record)
+
+    if let existing = activeNodes[nodeKey],
+      existing.type == type && existing.catalogID == effectiveCatalogID
+    {
+      let updated = existing.updatingProperties(resolvedProperties)
+      activeNodes[nodeKey] = updated
+      return updated
+    }
+
+    let node = Node(
       id: instanceID,
       type: type,
       catalogID: effectiveCatalogID,
       properties: resolvedProperties
     )
+    activeNodes[nodeKey] = node
+    return node
+  }
+
+  private func resolveChildReference(
+    definitionID childID: String,
+    instanceID childInstanceID: String,
+    basePath: String?,
+    index: Int?,
+    instanceSuffix: String?,
+    visited: Set<String>,
+    components: [String: ComponentModel],
+    data: JSONValue,
+    recurseIntoChildren: Bool
+  ) -> Node? {
+    let childIdentity = componentIdentity(for: childID, in: components)
+    currentNodeChildIdentities?.updateValue(childIdentity, forKey: childID)
+
+    let childNodeKey = makeNodeKey(instanceID: childInstanceID, basePath: basePath)
+    guard !visited.contains(childNodeKey), let childIdentity else {
+      return nil
+    }
+
+    let existingRecord = nodeRecords[childNodeKey]
+    if !recurseIntoChildren,
+      let existing = activeNodes[childNodeKey],
+      let existingRecord,
+      existingRecord.definitionID == childID,
+      existingRecord.basePath == basePath,
+      existingRecord.index == index,
+      existingRecord.instanceSuffix == instanceSuffix,
+      existingRecord.visited == visited,
+      existing.type == childIdentity.type && existing.catalogID == childIdentity.catalogID
+    {
+      currentNodeDirectChildren?.insert(childNodeKey)
+      return existing
+    }
+
+    let shouldRecurse =
+      recurseIntoChildren
+      || (existingRecord != nil
+        && (existingRecord?.basePath != basePath
+          || existingRecord?.index != index
+          || existingRecord?.instanceSuffix != instanceSuffix
+          || existingRecord?.visited != visited))
+    if let childNode = resolveNode(
+      definitionID: childID,
+      instanceID: childInstanceID,
+      basePath: basePath,
+      index: index,
+      instanceSuffix: instanceSuffix,
+      visited: visited,
+      components: components,
+      data: data,
+      recurseIntoChildren: shouldRecurse
+    ) {
+      currentNodeDirectChildren?.insert(childNodeKey)
+      return childNode
+    }
+    return nil
   }
 
   // MARK: - Property Classification & Extraction
@@ -394,14 +925,12 @@ public final class NodeResolver: Sendable {
     visited: Set<String>,
     components: [String: ComponentModel],
     data: JSONValue,
-    checks: [ResolvedCheck] = []
+    checks: [ResolvedCheck] = [],
+    recurseIntoChildren: Bool = true
   ) -> (any Resolved)? {
-    let previousComponentID = currentComponentID
     let previousPropertyPath = currentPropertyPath
-    currentComponentID = componentID
     currentPropertyPath = propertyKey
     defer {
-      currentComponentID = previousComponentID
       currentPropertyPath = previousPropertyPath
     }
     switch type {
@@ -436,13 +965,14 @@ public final class NodeResolver: Sendable {
         propertyKey: propertyKey,
         visited: visited,
         components: components,
-        data: data
+        data: data,
+        recurseIntoChildren: recurseIntoChildren
       )
     case .componentID:
       guard let childID = value.stringValue else { return nil }
       let effectiveSuffix = instanceSuffix ?? index.map { "\($0)" }
       let childInstanceID = effectiveSuffix.map { "\(childID)_\($0)" } ?? childID
-      return resolveNode(
+      return resolveChildReference(
         definitionID: childID,
         instanceID: childInstanceID,
         basePath: basePath,
@@ -450,7 +980,8 @@ public final class NodeResolver: Sendable {
         instanceSuffix: effectiveSuffix,
         visited: visited,
         components: components,
-        data: data
+        data: data,
+        recurseIntoChildren: recurseIntoChildren
       )
     case .number:
       return value.doubleValue
@@ -476,7 +1007,8 @@ public final class NodeResolver: Sendable {
             visited: visited,
             components: components,
             data: data,
-            checks: checks
+            checks: checks,
+            recurseIntoChildren: recurseIntoChildren
           ) {
             return resolved
           }
@@ -493,7 +1025,7 @@ public final class NodeResolver: Sendable {
             let nestedPropSchema = objProps[k] ?? .boolean(true)
             let classified = classifySchema(nestedPropSchema)
             let nestedPropType: PropertyType
-            let bindingKey = isV10 ? "@path" : "path"
+            let bindingKey = atLeastV10 ? "@path" : "path"
             if classified == .standard,
               v.objectValue?[bindingKey] != nil
             {
@@ -513,7 +1045,8 @@ public final class NodeResolver: Sendable {
               visited: visited,
               components: components,
               data: data,
-              checks: checks
+              checks: checks,
+              recurseIntoChildren: recurseIntoChildren
             ) {
               resolvedObj[k] = resVal
             }
@@ -540,11 +1073,21 @@ public final class NodeResolver: Sendable {
     basePath: String?,
     index: Int? = nil
   ) -> JSONValue {
+    let currentData = dataModel.data
+    let previousReadHook = dataModel.onReadPath
+    if currentNodeReadValues != nil {
+      dataModel.onReadPath = { [weak self] path in
+        self?.recordReadPath(path, in: currentData)
+      }
+    }
+    defer {
+      dataModel.onReadPath = previousReadHook
+    }
     let context = DataContext(
       dataModel: dataModel,
       path: basePath ?? "",
       functionHandler: self,
-      protocolVersion: protocolVersion ?? catalog.a2uiProtocolVersion,
+      protocolVersion: effectiveProtocolVersion,
       index: index
     )
     return context.resolveDynamicValue(value)
@@ -583,12 +1126,12 @@ public final class NodeResolver: Sendable {
     index: Int? = nil,
     data: JSONValue
   ) -> DataBinding<Bool> {
-    let bindingKey = isV10 ? "@path" : "path"
+    let bindingKey = atLeastV10 ? "@path" : "path"
     if let dict = value.dictionaryValue,
       let pathStr = dict[bindingKey]?.stringValue
     {
       let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      let resolvedValue = data[absPath]?.boolValue
+      let resolvedValue = readData(absPath, from: data)?.boolValue
       return DataBinding<Bool>(
         identity: .path(absPath),
         value: resolvedValue,
@@ -611,12 +1154,12 @@ public final class NodeResolver: Sendable {
     index: Int? = nil,
     data: JSONValue
   ) -> DataBinding<String> {
-    let bindingKey = isV10 ? "@path" : "path"
+    let bindingKey = atLeastV10 ? "@path" : "path"
     if let dict = value.dictionaryValue,
       let pathStr = dict[bindingKey]?.stringValue
     {
       let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      let resolvedValue = coerceToString(data[absPath])
+      let resolvedValue = coerceToString(readData(absPath, from: data))
       return DataBinding<String>(
         identity: .path(absPath),
         value: resolvedValue,
@@ -640,12 +1183,12 @@ public final class NodeResolver: Sendable {
     index: Int? = nil,
     data: JSONValue
   ) -> DataBinding<Double> {
-    let bindingKey = isV10 ? "@path" : "path"
+    let bindingKey = atLeastV10 ? "@path" : "path"
     if let dict = value.dictionaryValue,
       let pathStr = dict[bindingKey]?.stringValue
     {
       let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      let resolvedValue = data[absPath]?.doubleValue
+      let resolvedValue = readData(absPath, from: data)?.doubleValue
       return DataBinding<Double>(
         identity: .path(absPath),
         value: resolvedValue,
@@ -668,12 +1211,12 @@ public final class NodeResolver: Sendable {
     index: Int? = nil,
     data: JSONValue
   ) -> DataBinding<JSONValue> {
-    let bindingKey = isV10 ? "@path" : "path"
+    let bindingKey = atLeastV10 ? "@path" : "path"
     if let dict = value.dictionaryValue,
       let pathStr = dict[bindingKey]?.stringValue
     {
       let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      let resolvedValue = data[absPath]
+      let resolvedValue = readData(absPath, from: data)
       return DataBinding<JSONValue>(
         identity: .path(absPath),
         value: resolvedValue,
@@ -696,12 +1239,14 @@ public final class NodeResolver: Sendable {
     index: Int? = nil,
     data: JSONValue
   ) -> DataBinding<[String]> {
-    let bindingKey = isV10 ? "@path" : "path"
+    let bindingKey = atLeastV10 ? "@path" : "path"
     if let dict = value.dictionaryValue,
       let pathStr = dict[bindingKey]?.stringValue
     {
       let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-      let resolvedValue = data[absPath]?.arrayValue?.compactMap { self.coerceToString($0) }
+      let resolvedValue = readData(absPath, from: data)?.arrayValue?.compactMap {
+        self.coerceToString($0)
+      }
       return DataBinding<[String]>(
         identity: .path(absPath),
         value: resolvedValue,
@@ -735,10 +1280,10 @@ public final class NodeResolver: Sendable {
       let conditionJSON = ruleDict?["condition"] ?? ruleJSON
       let fallbackMessage = ruleDict?["message"]?.stringValue ?? "Validation failed"
 
-      let bindingKey = self.isV10 ? "@path" : "path"
+      let bindingKey = self.atLeastV10 ? "@path" : "path"
       if let dict = conditionJSON.dictionaryValue, let pathStr = dict[bindingKey]?.stringValue {
         let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
-        let rawVal = data[absPath]
+        let rawVal = self.readData(absPath, from: data)
         if let rawDict = rawVal?.objectValue, let valid = rawDict["valid"]?.boolValue {
           let code = rawDict["code"]?.stringValue
           let msg = rawDict["message"]?.stringValue ?? fallbackMessage
@@ -842,7 +1387,7 @@ public final class NodeResolver: Sendable {
       eventObj = nil
     }
 
-    let callKey = isV10 ? "@call" : "call"
+    let callKey = atLeastV10 ? "@call" : "call"
     let funcCallVal: JSONValue?
     if let wrapped = value["functionCall"], wrapped.dictionaryValue != nil {
       funcCallVal = wrapped
@@ -855,26 +1400,24 @@ public final class NodeResolver: Sendable {
     if let eventObj, let name = eventObj["name"]?.stringValue {
       let contextDict = eventObj["context"]?.dictionaryValue
       let userMessageVal = eventObj["userMessage"]
-      let initialUserMessage = userMessageVal.flatMap {
-        self.evaluateDynamicValue($0, basePath: basePath, index: index).stringValue
-      }
       let unresolvedIdentity = ResolvedAction.Identity.event(
         name: name,
         context: contextDict,
-        userMessage: initialUserMessage
+        userMessage: userMessageVal?.stringValue
       )
 
       return ResolvedAction(
         identity: unresolvedIdentity,
         sourceComponentID: componentID,
         dataContextPath: basePath,
+        rawUserMessage: userMessageVal,
         trigger: { [weak self] in
           guard let self else { return }
 
           let failedChecks = checks.filter { !$0.isValid }
           if !failedChecks.isEmpty {
             let errorMsg = failedChecks.map(\.message).joined(separator: ", ")
-            let version = self.catalog.a2uiProtocolVersion ?? .v10
+            let version = self.effectiveProtocolVersion ?? .v10
             self.actionHandler?.handle(
               error: .validationFailed(
                 ValidationFailedError(
@@ -929,7 +1472,7 @@ public final class NodeResolver: Sendable {
           let failedChecks = checks.filter { !$0.isValid }
           if !failedChecks.isEmpty {
             let errorMsg = failedChecks.map(\.message).joined(separator: ", ")
-            let version = self.catalog.a2uiProtocolVersion ?? .v10
+            let version = self.effectiveProtocolVersion ?? .v10
             self.actionHandler?.handle(
               error: .validationFailed(
                 ValidationFailedError(
@@ -963,7 +1506,8 @@ public final class NodeResolver: Sendable {
     propertyKey: String,
     visited: Set<String>,
     components: [String: ComponentModel],
-    data: JSONValue
+    data: JSONValue,
+    recurseIntoChildren: Bool = true
   ) -> [Node]? {
     switch value {
     case .array(let arr):
@@ -972,7 +1516,7 @@ public final class NodeResolver: Sendable {
       for item in arr {
         guard let childID = item.stringValue else { continue }
         let childInstanceID = effectiveSuffix.map { "\(childID)_\($0)" } ?? childID
-        if let childNode = resolveNode(
+        if let childNode = resolveChildReference(
           definitionID: childID,
           instanceID: childInstanceID,
           basePath: basePath,
@@ -980,7 +1524,8 @@ public final class NodeResolver: Sendable {
           instanceSuffix: effectiveSuffix,
           visited: visited,
           components: components,
-          data: data
+          data: data,
+          recurseIntoChildren: recurseIntoChildren
         ) {
           resolvedNodes.append(childNode)
         }
@@ -998,22 +1543,29 @@ public final class NodeResolver: Sendable {
       }
 
       let absPath = JSONValue.absolutePath(for: pathStr, in: basePath)
+      let normalizedTemplatePath = normalizePath(absPath)
+      currentNodeChildIdentities?.updateValue(
+        componentIdentity(for: templateID, in: components),
+        forKey: templateID
+      )
 
-      guard let dataListVal = data[absPath],
+      guard let dataListVal = data[normalizedTemplatePath],
         let dataItems = dataListVal.arrayValue
       else {
+        currentNodeTemplateCounts?[normalizedTemplatePath] = 0
         return []
       }
 
+      currentNodeTemplateCounts?[normalizedTemplatePath] = dataItems.count
       var expandedNodes: [Node] = []
 
       for (itemIndex, _) in dataItems.enumerated() {
         let itemSuffix =
           instanceSuffix.map { "\($0)_\(itemIndex)" } ?? "\(itemIndex)"
         let itemID = "\(templateID)_\(itemSuffix)"
-        let itemBasePath = "\(absPath)/\(itemIndex)"
+        let itemBasePath = "\(normalizedTemplatePath)/\(itemIndex)"
 
-        if let itemNode = resolveNode(
+        if let itemNode = resolveChildReference(
           definitionID: templateID,
           instanceID: itemID,
           basePath: itemBasePath,
@@ -1021,7 +1573,8 @@ public final class NodeResolver: Sendable {
           instanceSuffix: itemSuffix,
           visited: visited,
           components: components,
-          data: data
+          data: data,
+          recurseIntoChildren: recurseIntoChildren
         ) {
           expandedNodes.append(itemNode)
         }
@@ -1046,30 +1599,64 @@ extension NodeResolver: FunctionHandler {
     return getCatalog(id: callCatalogID)?.functions[name]
   }
 
-  /// Reports a failed function call, either not found or thrown by `evaluate`, as an
+  /// Checks that the catalog a v1.0 function call runs in resolves on this surface: the
+  /// catalog the call names, else the default catalog.
+  ///
+  /// - Throws: `A2UICatalogError` with the detail code `CATALOG_ERROR` if the named catalog is
+  ///   not available, or the call names none and there is no default catalog.
+  public func validateFunctionCatalog(id catalogID: String?, functionName: String) throws {
+    let path = CatalogResolutionErrors.callCatalogIDPath(functionName: functionName)
+    let code = CatalogResolutionErrors.runtimeCatalogErrorCode
+    if let catalogID {
+      guard catalogs[catalogID] != nil else {
+        throw CatalogResolutionErrors.catalogNotFound(catalogID, path: path, code: code)
+      }
+      return
+    }
+    guard let defaultCatalogID else {
+      throw CatalogResolutionErrors.noDefaultCatalog(
+        subject: "Function call '\(functionName)'",
+        surfaceID: surfaceID,
+        path: path,
+        code: code
+      )
+    }
+    guard catalogs[defaultCatalogID] != nil else {
+      throw CatalogResolutionErrors.catalogNotFound(defaultCatalogID, path: path, code: code)
+    }
+  }
+
+  /// Reports a failed function call: unresolvable catalogs map through `MessageErrorMapper`
+  /// (`CATALOG_ERROR`), while missing functions and errors thrown by `evaluate` are reported as
   /// `EXPRESSION_ERROR`, matching the other core SDKs.
   public func handleFunctionError(_ error: any Error, functionName: String) {
-    let version =
-      protocolVersion
-      ?? catalog.a2uiProtocolVersion
-      ?? (isV10 ? .v10 : .v09)
-    let message: String
-    if let a2uiError = error as? any A2UIError {
-      message = a2uiError.message
-    } else if let description = (error as? any LocalizedError)?.errorDescription {
-      message = description
-    } else {
-      message = String(describing: error)
-    }
-    let rendererError = RendererError.generic(
-      GenericError(
-        code: "EXPRESSION_ERROR",
+    let version = effectiveProtocolVersion ?? .v09
+    let rendererError: RendererError
+    if let catalogError = error as? A2UICatalogError {
+      rendererError = MessageErrorMapper().map(
+        catalogError,
         surfaceID: surfaceID,
-        message: message,
-        expression: functionName,
         version: version
       )
-    )
+    } else {
+      let message: String
+      if let a2uiError = error as? any A2UIError {
+        message = a2uiError.message
+      } else if let description = (error as? any LocalizedError)?.errorDescription {
+        message = description
+      } else {
+        message = String(describing: error)
+      }
+      rendererError = .generic(
+        GenericError(
+          code: "EXPRESSION_ERROR",
+          surfaceID: surfaceID,
+          message: message,
+          expression: functionName,
+          version: version
+        )
+      )
+    }
     let dedupeKey =
       "\(currentComponentID ?? ""):\(currentPropertyPath ?? ""):\(functionName):\(rendererError)"
     if isResolvingTree {

@@ -81,7 +81,7 @@ struct StateEngineV10Tests {
     let textComp = AnyComponentAPI(name: "Text", schema: textSchema)
     let catalog = Catalog(
       id: "test",
-      protocolVersion: "v1.0",
+      protocolVersion: "1.0",
       components: [cardComp, textComp] as [AnyComponentAPI]
     )
 
@@ -123,10 +123,11 @@ struct StateEngineV10Tests {
     let resolver = NodeResolver(
       surfaceID: "surf1",
       catalogs: [catalog.eraseToAnyCatalog()],
+      defaultCatalogID: catalog.id,
       componentsModel: componentsModel,
       dataModel: dataModel
     )
-    #expect(resolver.isV10 == true)
+    #expect(resolver.atLeastV10 == true)
 
     let rootNode = try #require(resolver.resolveTree())
     let children = rootNode.children(for: "children")
@@ -166,7 +167,7 @@ struct StateEngineV10Tests {
     let buttonComp = AnyComponentAPI(name: "Button", schema: buttonSchema)
     let catalog = Catalog(
       id: "test",
-      protocolVersion: "v1.0",
+      protocolVersion: "1.0",
       components: [buttonComp] as [AnyComponentAPI]
     )
 
@@ -198,10 +199,11 @@ struct StateEngineV10Tests {
     let resolver = NodeResolver(
       surfaceID: "surf1",
       catalogs: [catalog.eraseToAnyCatalog()],
+      defaultCatalogID: catalog.id,
       componentsModel: componentsModel,
       dataModel: dataModel
     )
-    #expect(resolver.isV10 == true)
+    #expect(resolver.atLeastV10 == true)
 
     let rootNode = resolver.resolveTree()
     #expect(rootNode?.isValid == false)
@@ -246,7 +248,7 @@ struct StateEngineV10Tests {
 
     let catalog = Catalog(
       id: "test",
-      protocolVersion: "v1.0",
+      protocolVersion: "1.0",
       components: [rootOnlyComp, containerComp, buttonComp]
     ).eraseToAnyCatalog()
 
@@ -331,7 +333,7 @@ struct StateEngineV10Tests {
 
     let catalog = Catalog(
       id: "v10_modal_cat",
-      protocolVersion: "v1.0",
+      protocolVersion: "1.0",
       components: [
         AnyComponentAPI(name: "Modal", schema: modalSchema),
         AnyComponentAPI(name: "Text", schema: textSchema),
@@ -397,7 +399,7 @@ struct StateEngineV10Tests {
     )
     let catalog = Catalog(
       id: "test_cat",
-      protocolVersion: "v1.0",
+      protocolVersion: "1.0",
       components: [AnyComponentAPI(name: "Text", schema: dummySchema)],
       functions: [any FunctionImplementation]()
     ).eraseToAnyCatalog()
@@ -459,7 +461,7 @@ struct StateEngineV10Tests {
     )
     let catalog = Catalog(
       id: "test_v10",
-      protocolVersion: "v1.0",
+      protocolVersion: "1.0",
       components: [AnyComponentAPI(name: "Button", schema: buttonSchema)]
     ).eraseToAnyCatalog()
 
@@ -489,6 +491,7 @@ struct StateEngineV10Tests {
     let resolver = NodeResolver(
       surfaceID: "s1",
       catalogs: [catalog],
+      defaultCatalogID: catalog.id,
       componentsModel: componentsModel,
       dataModel: dataModel,
       protocolVersion: .v10
@@ -511,7 +514,7 @@ struct StateEngineV10Tests {
 
     // 1. Invalid @path in v1.0 components should throw A2UIValidationError
     let invalidAtPathMsg: JSONValue = .object([
-      "version": .string("v1.0"),
+      "version": .string("1.0"),
       "updateComponents": .object([
         "surfaceId": .string("s1"),
         "components": .array([
@@ -529,7 +532,7 @@ struct StateEngineV10Tests {
 
     // 2. Invalid @call identifier in v1.0 components should throw A2UIValidationError
     let invalidAtCallMsg: JSONValue = .object([
-      "version": .string("v1.0"),
+      "version": .string("1.0"),
       "updateComponents": .object([
         "surfaceId": .string("s1"),
         "components": .array([
@@ -547,7 +550,7 @@ struct StateEngineV10Tests {
 
     // 3. Excessive @call nesting depth (> 5) in v1.0 components should throw A2UIRecursionError
     let deepAtCallMsg: JSONValue = .object([
-      "version": .string("v1.0"),
+      "version": .string("1.0"),
       "updateComponents": .object([
         "surfaceId": .string("s1"),
         "components": .array([
@@ -605,7 +608,7 @@ struct StateEngineV10Tests {
     ])
 
     let v10CreateWithUserData: JSONValue = .object([
-      "version": .string("v1.0"),
+      "version": .string("1.0"),
       "createSurface": .object([
         "surfaceId": .string("s1"),
         "catalogId": .string("https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json"),
@@ -616,7 +619,7 @@ struct StateEngineV10Tests {
     #expect(v10CreateOps.count == 1)
 
     let v10UpdateDataWithUserData: JSONValue = .object([
-      "version": .string("v1.0"),
+      "version": .string("1.0"),
       "updateDataModel": .object([
         "surfaceId": .string("s1"),
         "path": .string("/"),

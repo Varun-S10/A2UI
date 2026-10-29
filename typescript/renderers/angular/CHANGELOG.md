@@ -1,5 +1,12 @@
 ## Unreleased
 
+- `new AngularCatalog(id, components?, functions?, themeSchema?, instructions?)` without a `protocolVersion` constructs a `'0.9'` catalog (deprecated overload), so catalogs written against 0.9.x keep constructing. `new AngularCatalog(id, protocolVersion, ...)` is unchanged ([#3658](https://github.com/a2ui-project/a2ui/pull/3658)).
+- (v0_9) Re-export `DefaultMarkdownRenderer` from `@a2ui/angular/v0_9` ([#3658](https://github.com/a2ui-project/a2ui/pull/3658)).
+- Hosted components bind from the resolved `ComponentNode` instead of re-resolving each property through the `DataContext`: child references (`Child`) now carry their `node`, `ComponentBinder.bindNode` and `ComponentBinder.unbind` are new public methods, `ComponentBinder.bind(context)` is deprecated, and `CheckProps.validationResults` (`CheckValidationResult`) is available on components with `checks`. `provideA2Ui` now initializes Angular reactivity before any surface or resolver signal is created. [#3706](https://github.com/a2ui-project/a2ui/pull/3706)
+
+## 0.13.0
+
+- Bump dependencies for compatibility with `@a2ui/web_core: ^0.14.0`.
 - (v1_0) `ComponentHostComponent` renders components on a surface whose `createSurface` names no default catalog by resolving each against its own catalog. `SurfaceModel.defaultCatalog` (and the deprecated `catalog` getter) from `@a2ui/web_core` may now be `undefined`, so code that reads `surface.defaultCatalog` must handle that case.
 - Relocate package directory from `renderers/angular` to `typescript/renderers/angular`.
 
